@@ -1,0 +1,26 @@
+{
+  "name": "claude-session-watcher",
+  "version": "0.1.0",
+  "description": "Background watcher for Claude Code Remote Control sessions.",
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "claude-session-watcher": "./scripts/npm-launcher.mjs",
+    "csw": "./scripts/npm-launcher.mjs"
+  },
+  "files": [
+    "scripts/",
+    "src/",
+    "pyproject.toml",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "python -m pytest",
+    "lint": "ruff check ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/PiefkePaul/claude-session-watcher.git"
+  }
+}

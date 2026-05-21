@@ -1,0 +1,17 @@
+services:
+  claude-session-watcher:
+    build: .
+    image: claude-session-watcher:local
+    restart: unless-stopped
+    ports:
+      - "47831:47831"
+    environment:
+      CSW_HOST: 0.0.0.0
+      CSW_PORT: 47831
+      CSW_DATA_DIR: /data
+      CSW_CAMOUFOX_HEADLESS: virtual
+    volumes:
+      - csw-data:/data
+
+volumes:
+  csw-data:

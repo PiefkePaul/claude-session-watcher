@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Claude Session Watcher</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Claude Session Watcher</h1>
+        <p>Background monitoring for Claude Code Remote Control sessions.</p>
+      </div>
+      <a class="button secondary" href="/health">Health</a>
+    </header>
+
+    <main class="layout">
+      <section class="panel">
+        <h2>Accounts</h2>
+        <form class="inline-form" action="/accounts" method="post">
+          <label>
+            Account name
+            <input name="name" placeholder="work-account" required />
+          </label>
+          <button type="submit">Add account</button>
+        </form>
+
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Status</th>
+                <th>Profile</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for account in accounts %}
+              <tr>
+                <td>{{ account.name }}</td>
+                <td><span class="status">{{ account.status }}</span></td>
+                <td class="path">{{ account.profile_dir }}</td>
+                <td>
+                  <form action="/accounts/{{ account.id }}/login" method="post">
+                    <button type="submit" class="secondary">Open login</button>
+                  </form>
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="4" class="empty">No accounts yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>New watcher</h2>
+        <form class="watcher-form" action="/watchers" method="post">
+          <label>
+            Name
+            <input name="name" placeholder="main-project" required />
+          </label>
+          <label>
+            Account
+            <select name="account_id" required>
+              {% for account in accounts %}
+              <option value="{{ account.id }}">{{ account.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="wide">
+            Remote Control URL
+            <input name="remote_url" placeholder="https://claude.ai/code/..." required />
+          </label>
+          <label>
+            5h threshold
+            <input name="five_hour_threshold" type="number" value="95" min="1" max="100" step="0.1" />
+          </label>
+          <label>
+            7d threshold
+            <input name="seven_day_threshold" type="number" value="98" min="1" max="100" step="0.1" />
+          </label>
+          <label>
+            Resume threshold
+            <input name="resume_threshold" type="number" value="5" min="0" max="100" step="0.1" />
+          </label>
+          <label>
+            Check interval
+            <input name="check_interval_seconds" type="number" value="60" min="10" />
+          </label>
+          <label class="wide">
+            Pause message
+            <textarea name="pause_message" rows="3">Pause after the current safe checkpoint. Do not start new work. Wait until I send continue.</textarea>
+          </label>
+          <label class="wide">
+            Continue message
+            <input name="continue_message" value="continue" />
+          </label>
+          <button type="submit">Create watcher</button>
+        </form>
+      </section>
+
+      <section class="panel wide-panel">
+        <h2>Watchers</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>State</th>
+                <th>Enabled</th>
+                <th>Reason</th>
+                <th>Last check</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for watcher in watchers %}
+              <tr>
+                <td>{{ watcher.name }}</td>
+                <td><span class="status {{ watcher.state }}">{{ watcher.state }}</span></td>
+                <td>{{ "yes" if watcher.enabled else "no" }}</td>
+                <td>{{ watcher.last_reason or "" }}</td>
+                <td>{{ watcher.last_checked_at or "" }}</td>
+                <td class="actions">
+                  <form action="/watchers/{{ watcher.id }}/check" method="post"><button class="secondary">Check</button></form>
+                  {% if watcher.enabled %}
+                  <form action="/watchers/{{ watcher.id }}/disable" method="post"><button class="danger">Disable</button></form>
+                  {% else %}
+                  <form action="/watchers/{{ watcher.id }}/enable" method="post"><button class="secondary">Enable</button></form>
+                  {% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="6" class="empty">No watchers yet.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel wide-panel">
+        <h2>Recent events</h2>
+        <div class="events">
+          {% for event in events %}
+          <div class="event {{ event.level }}">
+            <time>{{ event.created_at }}</time>
+            <span>#{{ event.watcher_id }}</span>
+            <p>{{ event.message }}</p>
+          </div>
+          {% else %}
+          <p class="empty">No events yet.</p>
+          {% endfor %}
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
