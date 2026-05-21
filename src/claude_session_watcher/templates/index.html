@@ -126,6 +126,7 @@
                 <td>{{ watcher.last_reason or "" }}</td>
                 <td>{{ watcher.last_checked_at or "" }}</td>
                 <td class="actions">
+                  <a class="button secondary" href="/watchers/{{ watcher.id }}/edit">Edit</a>
                   <form action="/watchers/{{ watcher.id }}/check" method="post"><button class="secondary">Check</button></form>
                   {% if watcher.enabled %}
                   <form action="/watchers/{{ watcher.id }}/disable" method="post"><button class="danger">Disable</button></form>

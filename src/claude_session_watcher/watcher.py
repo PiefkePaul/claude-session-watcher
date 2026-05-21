@@ -37,6 +37,9 @@ class WatcherService:
         account = self.store.get_account(watcher.account_id)
         return await self._check_watcher(account, watcher)
 
+    def reschedule_now(self, watcher_id: int) -> None:
+        self._next_due.pop(watcher_id, None)
+
     async def _run(self) -> None:
         while not self._stop.is_set():
             loop_time = asyncio.get_running_loop().time()

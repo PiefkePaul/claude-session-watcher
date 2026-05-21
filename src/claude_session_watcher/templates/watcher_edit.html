@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Edit {{ watcher.name }} - Claude Session Watcher</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Edit watcher</h1>
+        <p>{{ watcher.name }}</p>
+      </div>
+      <a class="button secondary" href="/">Back</a>
+    </header>
+
+    <main class="layout single">
+      <section class="panel editor-panel">
+        <h2>Configuration</h2>
+        <form class="watcher-form" action="/watchers/{{ watcher.id }}" method="post">
+          <label>
+            Name
+            <input name="name" value="{{ watcher.name }}" required />
+          </label>
+          <label>
+            Account
+            <select name="account_id" required>
+              {% for account in accounts %}
+              <option value="{{ account.id }}" {% if account.id == watcher.account_id %}selected{% endif %}>{{ account.name }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="wide checkbox-row">
+            <input name="enabled" type="checkbox" value="true" {% if watcher.enabled %}checked{% endif %} />
+            Enabled
+          </label>
+          <label class="wide">
+            Remote Control URL
+            <input name="remote_url" value="{{ watcher.remote_url }}" required />
+          </label>
+          <label>
+            5h threshold
+            <input name="five_hour_threshold" type="number" value="{{ watcher.five_hour_threshold }}" min="1" max="100" step="0.1" />
+          </label>
+          <label>
+            7d threshold
+            <input name="seven_day_threshold" type="number" value="{{ watcher.seven_day_threshold }}" min="1" max="100" step="0.1" />
+          </label>
+          <label>
+            Resume threshold
+            <input name="resume_threshold" type="number" value="{{ watcher.resume_threshold }}" min="0" max="100" step="0.1" />
+          </label>
+          <label>
+            Check interval seconds
+            <input name="check_interval_seconds" type="number" value="{{ watcher.check_interval_seconds }}" min="10" />
+          </label>
+          <label class="wide">
+            Pause message
+            <textarea name="pause_message" rows="4">{{ watcher.pause_message }}</textarea>
+          </label>
+          <label class="wide">
+            Continue message
+            <input name="continue_message" value="{{ watcher.continue_message }}" />
+          </label>
+          <div class="form-actions wide">
+            <button type="submit">Save watcher</button>
+            <a class="button secondary" href="/">Cancel</a>
+          </div>
+        </form>
+      </section>
+    </main>
+  </body>
+</html>

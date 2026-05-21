@@ -79,6 +79,7 @@ The container stores browser profiles and SQLite state in the `csw-data` volume.
 
 The watcher uses the authenticated Camoufox browser profile itself for usage checks. It does not require you to copy `CLAUDE_SESSION_KEY`.
 After login you can close the visible Camoufox window. Later checks reopen the same persistent profile in the background.
+Existing watchers can be edited from the dashboard to change the account, Remote Control URL, thresholds, check interval, enabled state, and pause/continue messages.
 
 ## Start Claude Code With Remote Control
 

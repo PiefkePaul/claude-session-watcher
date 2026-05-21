@@ -109,14 +109,62 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         store.create_watcher(watcher)
         return RedirectResponse("/", status_code=303)
 
+    @app.get("/watchers/{watcher_id}/edit", response_class=HTMLResponse)
+    async def edit_watcher(request: Request, watcher_id: int):
+        watcher = store.get_watcher(watcher_id)
+        return templates.TemplateResponse(
+            request,
+            "watcher_edit.html",
+            {
+                "accounts": store.list_accounts(),
+                "watcher": watcher,
+            },
+        )
+
+    @app.post("/watchers/{watcher_id}")
+    async def update_watcher(
+        watcher_id: int,
+        name: str = Form(...),
+        account_id: int = Form(...),
+        remote_url: str = Form(...),
+        enabled: bool = Form(False),
+        five_hour_threshold: float = Form(95.0),
+        seven_day_threshold: float = Form(98.0),
+        resume_threshold: float = Form(5.0),
+        check_interval_seconds: int = Form(60),
+        pause_message: str = Form(...),
+        continue_message: str = Form("continue"),
+    ):
+        existing = store.get_watcher(watcher_id)
+        updated = Watcher(
+            id=watcher_id,
+            name=name.strip(),
+            account_id=account_id,
+            remote_url=remote_url.strip(),
+            enabled=enabled,
+            state=existing.state,
+            five_hour_threshold=five_hour_threshold,
+            seven_day_threshold=seven_day_threshold,
+            resume_threshold=resume_threshold,
+            check_interval_seconds=check_interval_seconds,
+            pause_message=pause_message,
+            continue_message=continue_message,
+        )
+        store.update_watcher_config(watcher_id, updated)
+        service.reschedule_now(watcher_id)
+        store.add_event(watcher_id, "info", "Watcher configuration updated")
+        return RedirectResponse("/", status_code=303)
+
     @app.post("/watchers/{watcher_id}/enable")
     async def enable_watcher(watcher_id: int):
         store.set_watcher_enabled(watcher_id, True)
+        service.reschedule_now(watcher_id)
         return RedirectResponse("/", status_code=303)
 
     @app.post("/watchers/{watcher_id}/disable")
     async def disable_watcher(watcher_id: int):
         store.set_watcher_enabled(watcher_id, False)
+        service.reschedule_now(watcher_id)
         return RedirectResponse("/", status_code=303)
 
     @app.post("/watchers/{watcher_id}/check")

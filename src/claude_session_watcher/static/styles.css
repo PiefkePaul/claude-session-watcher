@@ -68,6 +68,11 @@ h2 {
   padding: 22px;
 }
 
+.layout.single {
+  grid-template-columns: minmax(320px, 860px);
+  justify-content: center;
+}
+
 .panel {
   background: var(--surface);
   border: 1px solid var(--border);
@@ -79,6 +84,10 @@ h2 {
 
 .wide-panel {
   grid-column: 1 / -1;
+}
+
+.editor-panel {
+  width: 100%;
 }
 
 label {
@@ -161,6 +170,24 @@ button:hover,
 
 .watcher-form .wide {
   grid-column: 1 / -1;
+}
+
+.checkbox-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+}
+
+.checkbox-row input {
+  width: 18px;
+  height: 18px;
+}
+
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .watcher-form button {

@@ -205,6 +205,34 @@ class Store:
                 (int(enabled), utc_now(), watcher_id),
             )
 
+    def update_watcher_config(self, watcher_id: int, watcher: Watcher) -> Watcher:
+        with self._connect() as conn:
+            conn.execute(
+                """
+                UPDATE watchers
+                SET name = ?, account_id = ?, remote_url = ?, enabled = ?,
+                    five_hour_threshold = ?, seven_day_threshold = ?,
+                    resume_threshold = ?, check_interval_seconds = ?,
+                    pause_message = ?, continue_message = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    watcher.name,
+                    watcher.account_id,
+                    watcher.remote_url,
+                    int(watcher.enabled),
+                    watcher.five_hour_threshold,
+                    watcher.seven_day_threshold,
+                    watcher.resume_threshold,
+                    watcher.check_interval_seconds,
+                    watcher.pause_message,
+                    watcher.continue_message,
+                    utc_now(),
+                    watcher_id,
+                ),
+            )
+        return self.get_watcher(watcher_id)
+
     def update_watcher_runtime(
         self,
         watcher_id: int,
