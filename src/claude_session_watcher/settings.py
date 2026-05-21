@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,15 +15,32 @@ def default_data_dir() -> Path:
     return base / "claude-session-watcher"
 
 
+def default_headless() -> str | bool:
+    return False if os.name == "nt" else "virtual"
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="CSW_", env_file=".env", extra="ignore")
 
     data_dir: Path = Field(default_factory=default_data_dir)
     host: str = "127.0.0.1"
     port: int = 47831
-    camoufox_headless: str | bool = "virtual"
+    camoufox_headless: str | bool = Field(default_factory=default_headless)
     camoufox_os: str | None = None
     check_jitter_seconds: int = 5
+
+    @field_validator("camoufox_headless", mode="before")
+    @classmethod
+    def parse_headless(cls, value):
+        if isinstance(value, str):
+            lowered = value.strip().lower()
+            if lowered in {"false", "0", "no", "off"}:
+                return False
+            if lowered in {"true", "1", "yes", "on"}:
+                return True
+            if lowered == "virtual":
+                return "virtual"
+        return value
 
     @property
     def db_path(self) -> Path:
