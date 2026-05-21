@@ -115,6 +115,65 @@ class CamoufoxManager:
                 return str(cookie["value"])
         raise BrowserError("No sessionKey cookie found. Open login and sign in first.")
 
+    async def fetch_usage(self, profile_dir: Path) -> dict[str, Any]:
+        try:
+            return await self._fetch_usage_once(profile_dir)
+        except Exception as exc:  # noqa: BLE001
+            if not self._is_closed_error(exc):
+                raise
+            await self._discard_profile(profile_dir)
+            return await self._fetch_usage_once(profile_dir)
+
+    async def _fetch_usage_once(self, profile_dir: Path) -> dict[str, Any]:
+        context = await self.context_for_profile(profile_dir)
+        page = await self._get_or_open_page(context, "https://claude.ai/code")
+        if not page.url.startswith("https://claude.ai/"):
+            await page.goto("https://claude.ai/code", wait_until="domcontentloaded")
+        orgs = await self._browser_json(page, "/api/organizations")
+        if not isinstance(orgs, list) or not orgs:
+            raise BrowserError("Claude did not return any organizations for this browser profile")
+
+        errors: list[str] = []
+        for org in orgs:
+            if not isinstance(org, dict):
+                continue
+            org_id = org.get("uuid") or org.get("id")
+            if not org_id:
+                continue
+            try:
+                usage = await self._browser_json(page, f"/api/organizations/{org_id}/usage")
+            except BrowserError as exc:
+                errors.append(f"{org_id}: {exc}")
+                continue
+            if isinstance(usage, dict) and (
+                "five_hour" in usage or "seven_day" in usage
+            ):
+                usage["_csw_org_id"] = org_id
+                usage["_csw_org_name"] = org.get("name")
+                return usage
+            errors.append(f"{org_id}: usage payload missing expected keys")
+
+        detail = "; ".join(errors) if errors else "no usable organization ids found"
+        raise BrowserError(f"Could not read Claude usage for this browser profile: {detail}")
+
+    async def _browser_json(self, page, path: str):
+        return await page.evaluate(
+            """
+            async (path) => {
+              const response = await fetch(path, {
+                credentials: "include",
+                headers: { "accept": "application/json" }
+              });
+              const text = await response.text();
+              if (!response.ok) {
+                throw new Error(`${response.status} ${response.statusText}: ${text.slice(0, 300)}`);
+              }
+              return text ? JSON.parse(text) : null;
+            }
+            """,
+            path,
+        )
+
     async def send_prompt(self, profile_dir: Path, remote_url: str, prompt: str) -> None:
         try:
             await self._send_prompt_once(profile_dir, remote_url, prompt)

@@ -73,8 +73,8 @@ class WatcherService:
             raise ValueError("Watcher must be stored before checking")
 
         profile_dir = Path(account.profile_dir)
-        session_key = await self.browser.session_key(profile_dir)
-        usage = await ClaudeUsageClient(session_key=session_key).fetch()
+        usage_data = await self.browser.fetch_usage(profile_dir)
+        usage = ClaudeUsageClient._parse(usage_data)
         pause_reason = usage.is_pause_required(
             watcher.five_hour_threshold,
             watcher.seven_day_threshold,

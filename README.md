@@ -77,7 +77,7 @@ The container stores browser profiles and SQLite state in the `csw-data` volume.
 4. Add a watcher with a Claude Remote Control URL.
 5. Leave the service running.
 
-The watcher will extract the `sessionKey` cookie from that profile and use it for usage checks.
+The watcher uses the authenticated Camoufox browser profile itself for usage checks. It does not require you to copy `CLAUDE_SESSION_KEY`.
 After login you can close the visible Camoufox window. Later checks reopen the same persistent profile in the background.
 
 ## Start Claude Code With Remote Control
