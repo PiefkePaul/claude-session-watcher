@@ -27,7 +27,7 @@ The intended workflow is one long-running Claude Code session:
 2. Connect the watcher to that Remote Control URL.
 3. The watcher monitors usage in the background.
 4. At 95% of the 5-hour limit or 98% of the weekly limit, it sends a pause instruction.
-5. It resumes only when all known limits are reset enough to continue.
+5. It resumes when no watched limit is still at or above its configured pause threshold.
 
 The browser `sessionKey` is not entered manually in the normal flow. The watcher reads it from the Camoufox profile after you log in.
 
@@ -109,7 +109,6 @@ Watcher defaults:
 | --- | --- |
 | 5-hour pause threshold | `95%` |
 | 7-day pause threshold | `98%` |
-| Resume threshold | `5%` for every known usage section |
 | Check interval | `60s` |
 
 ## Security Notes

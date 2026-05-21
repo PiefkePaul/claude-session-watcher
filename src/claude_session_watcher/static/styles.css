@@ -225,6 +225,19 @@ th {
   font-size: 12px;
 }
 
+.muted {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  margin-top: 3px;
+}
+
+.metric {
+  display: block;
+  font-weight: 780;
+  color: var(--text);
+}
+
 .status {
   display: inline-flex;
   align-items: center;

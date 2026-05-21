@@ -57,11 +57,8 @@ class UsageSnapshot:
             return None
         return max(reasons, key=lambda item: item[0])[1]
 
-    def is_resume_ready(self, resume_threshold: float) -> bool:
-        for section in (self.five_hour, self.seven_day):
-            if section is not None and section.utilization > resume_threshold:
-                return False
-        return True
+    def is_resume_ready(self, five_hour_threshold: float, seven_day_threshold: float) -> bool:
+        return self.is_pause_required(five_hour_threshold, seven_day_threshold) is None
 
 
 class ClaudeUsageClient:

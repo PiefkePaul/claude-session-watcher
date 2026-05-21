@@ -106,13 +106,16 @@ class WatcherService:
             return "waiting"
 
         if watcher.state == "paused":
-            if usage.is_resume_ready(watcher.resume_threshold):
+            if usage.is_resume_ready(
+                watcher.five_hour_threshold,
+                watcher.seven_day_threshold,
+            ):
                 await self._send(watcher, account, watcher.continue_message)
                 self.store.update_watcher_runtime(
                     watcher.id,
                     state="active",
                     last_usage_json=raw_json,
-                    last_reason="resume threshold reached",
+                    last_reason="blocking limit cleared",
                     last_error=None,
                 )
                 self.store.add_event(watcher.id, "info", "Continue sent")
@@ -121,7 +124,7 @@ class WatcherService:
                 watcher.id,
                 state="paused",
                 last_usage_json=raw_json,
-                last_reason="below pause threshold, waiting for full reset",
+                last_reason="waiting for blocking limit to drop below threshold",
                 last_error=None,
             )
             return "waiting"

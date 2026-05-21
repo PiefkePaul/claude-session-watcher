@@ -84,10 +84,6 @@
             <input name="seven_day_threshold" type="number" value="98" min="1" max="100" step="0.1" />
           </label>
           <label>
-            Resume threshold
-            <input name="resume_threshold" type="number" value="5" min="0" max="100" step="0.1" />
-          </label>
-          <label>
             Check interval
             <input name="check_interval_seconds" type="number" value="60" min="10" />
           </label>
@@ -112,6 +108,8 @@
                 <th>Name</th>
                 <th>State</th>
                 <th>Enabled</th>
+                <th>5h</th>
+                <th>7d</th>
                 <th>Reason</th>
                 <th>Last check</th>
                 <th>Actions</th>
@@ -120,23 +118,39 @@
             <tbody>
               {% for watcher in watchers %}
               <tr>
-                <td>{{ watcher.name }}</td>
-                <td><span class="status {{ watcher.state }}">{{ watcher.state }}</span></td>
-                <td>{{ "yes" if watcher.enabled else "no" }}</td>
-                <td>{{ watcher.last_reason or "" }}</td>
-                <td>{{ watcher.last_checked_at or "" }}</td>
+                <td>{{ watcher.watcher.name }}</td>
+                <td><span class="status {{ watcher.watcher.state }}">{{ watcher.watcher.state }}</span></td>
+                <td>{{ "yes" if watcher.watcher.enabled else "no" }}</td>
+                <td>
+                  {% if watcher.five_hour.utilization is not none %}
+                  <span class="metric">{{ "%.1f"|format(watcher.five_hour.utilization) }}%</span>
+                  {% if watcher.five_hour.reset_display %}
+                  <span class="muted">reset {{ watcher.five_hour.reset_display }}</span>
+                  {% endif %}
+                  {% endif %}
+                </td>
+                <td>
+                  {% if watcher.seven_day.utilization is not none %}
+                  <span class="metric">{{ "%.1f"|format(watcher.seven_day.utilization) }}%</span>
+                  {% if watcher.seven_day.reset_display %}
+                  <span class="muted">reset {{ watcher.seven_day.reset_display }}</span>
+                  {% endif %}
+                  {% endif %}
+                </td>
+                <td>{{ watcher.watcher.last_reason or "" }}</td>
+                <td>{{ watcher.last_checked_display }}</td>
                 <td class="actions">
-                  <a class="button secondary" href="/watchers/{{ watcher.id }}/edit">Edit</a>
-                  <form action="/watchers/{{ watcher.id }}/check" method="post"><button class="secondary">Check</button></form>
-                  {% if watcher.enabled %}
-                  <form action="/watchers/{{ watcher.id }}/disable" method="post"><button class="danger">Disable</button></form>
+                  <a class="button secondary" href="/watchers/{{ watcher.watcher.id }}/edit">Edit</a>
+                  <form action="/watchers/{{ watcher.watcher.id }}/check" method="post"><button class="secondary">Check</button></form>
+                  {% if watcher.watcher.enabled %}
+                  <form action="/watchers/{{ watcher.watcher.id }}/disable" method="post"><button class="danger">Disable</button></form>
                   {% else %}
-                  <form action="/watchers/{{ watcher.id }}/enable" method="post"><button class="secondary">Enable</button></form>
+                  <form action="/watchers/{{ watcher.watcher.id }}/enable" method="post"><button class="secondary">Enable</button></form>
                   {% endif %}
                 </td>
               </tr>
               {% else %}
-              <tr><td colspan="6" class="empty">No watchers yet.</td></tr>
+              <tr><td colspan="8" class="empty">No watchers yet.</td></tr>
               {% endfor %}
             </tbody>
           </table>

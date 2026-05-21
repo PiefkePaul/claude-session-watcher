@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
 from .browser import CamoufoxManager
+from .formatting import build_ui_watcher
 from .models import Watcher
 from .settings import Settings
 from .store import Store
@@ -51,12 +52,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         accounts = store.list_accounts()
         watchers = store.list_watchers()
         events = store.list_events(limit=50)
+        ui_watchers = [build_ui_watcher(watcher) for watcher in watchers]
         return templates.TemplateResponse(
             request,
             "index.html",
             {
                 "accounts": accounts,
-                "watchers": watchers,
+                "watchers": ui_watchers,
                 "events": events,
                 "data_dir": settings.data_dir,
             },
@@ -86,7 +88,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         remote_url: str = Form(...),
         five_hour_threshold: float = Form(95.0),
         seven_day_threshold: float = Form(98.0),
-        resume_threshold: float = Form(5.0),
         check_interval_seconds: int = Form(60),
         pause_message: str = Form(
             "Pause after the current safe checkpoint. Do not start new work. "
@@ -101,7 +102,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             remote_url=remote_url.strip(),
             five_hour_threshold=five_hour_threshold,
             seven_day_threshold=seven_day_threshold,
-            resume_threshold=resume_threshold,
             check_interval_seconds=check_interval_seconds,
             pause_message=pause_message,
             continue_message=continue_message,
@@ -130,7 +130,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         enabled: bool = Form(False),
         five_hour_threshold: float = Form(95.0),
         seven_day_threshold: float = Form(98.0),
-        resume_threshold: float = Form(5.0),
         check_interval_seconds: int = Form(60),
         pause_message: str = Form(...),
         continue_message: str = Form("continue"),
@@ -145,7 +144,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             state=existing.state,
             five_hour_threshold=five_hour_threshold,
             seven_day_threshold=seven_day_threshold,
-            resume_threshold=resume_threshold,
+            resume_threshold=existing.resume_threshold,
             check_interval_seconds=check_interval_seconds,
             pause_message=pause_message,
             continue_message=continue_message,
