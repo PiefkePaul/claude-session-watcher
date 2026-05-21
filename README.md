@@ -78,6 +78,7 @@ The container stores browser profiles and SQLite state in the `csw-data` volume.
 5. Leave the service running.
 
 The watcher will extract the `sessionKey` cookie from that profile and use it for usage checks.
+After login you can close the visible Camoufox window. Later checks reopen the same persistent profile in the background.
 
 ## Start Claude Code With Remote Control
 

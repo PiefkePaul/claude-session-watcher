@@ -16,7 +16,7 @@ def default_data_dir() -> Path:
 
 
 def default_headless() -> str | bool:
-    return False if os.name == "nt" else "virtual"
+    return True if os.name == "nt" else "virtual"
 
 
 class Settings(BaseSettings):
