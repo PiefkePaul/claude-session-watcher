@@ -238,6 +238,10 @@ th {
   color: var(--text);
 }
 
+.timestamp {
+  white-space: pre;
+}
+
 .status {
   display: inline-flex;
   align-items: center;

@@ -138,7 +138,7 @@
                   {% endif %}
                 </td>
                 <td>{{ watcher.watcher.last_reason or "" }}</td>
-                <td>{{ watcher.last_checked_display }}</td>
+                <td><span class="timestamp">{{ watcher.last_checked_display }}</span></td>
                 <td class="actions">
                   <a class="button secondary" href="/watchers/{{ watcher.watcher.id }}/edit">Edit</a>
                   <form action="/watchers/{{ watcher.watcher.id }}/check" method="post"><button class="secondary">Check</button></form>
