@@ -151,6 +151,22 @@
                 min="10"
               />
             </label>
+            <label>
+              Pause template
+              <select name="pause_template">
+                <option value="custom" {% if row.watcher.pause_template == "custom" %}selected{% endif %}>
+                  Custom
+                </option>
+                {% for template in pause_templates %}
+                <option
+                  value="{{ template.key }}"
+                  {% if row.watcher.pause_template == template.key %}selected{% endif %}
+                >
+                  {{ template.label }}
+                </option>
+                {% endfor %}
+              </select>
+            </label>
             <label class="wide">
               Pause message
               <textarea name="pause_message" rows="2">{{ row.watcher.pause_message }}</textarea>

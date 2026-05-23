@@ -29,8 +29,11 @@ class Settings(BaseSettings):
     camoufox_os: str | None = None
     browser_keepalive: bool = False
     check_jitter_seconds: int = 5
+    resume_safety_margin_seconds: int = 120
     ui_token: str | None = None
     local_port_bind_only: bool = False
+    notify_ntfy_url: str | None = None
+    notify_ntfy_token: str | None = None
 
     @field_validator("camoufox_headless", mode="before")
     @classmethod

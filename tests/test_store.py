@@ -17,9 +17,11 @@ def test_store_creates_account_and_watcher(tmp_path):
 
     assert watcher.id is not None
     assert watcher.five_hour_threshold == 95.0
+    assert watcher.pause_template == "custom"
     assert store.list_watchers()[0].remote_url == "https://claude.ai/code/session"
     account_watcher = store.get_account_watcher_by_account(account.id)
     assert account_watcher is not None
+    assert account_watcher.pause_template == "custom"
     sessions = store.list_sessions(account.id)
     assert sessions[0].title == "main"
     assert sessions[0].watch_enabled is True
@@ -60,6 +62,7 @@ def test_store_updates_watcher_configuration(tmp_path):
         seven_day_threshold=97.5,
         resume_threshold=3.0,
         check_interval_seconds=120,
+        pause_template="worklog",
         pause_message="pause safely",
         continue_message="resume now",
     )
@@ -72,8 +75,34 @@ def test_store_updates_watcher_configuration(tmp_path):
     assert saved.seven_day_threshold == 97.5
     assert saved.resume_threshold == 3.0
     assert saved.check_interval_seconds == 120
+    assert saved.pause_template == "worklog"
     assert saved.pause_message == "pause safely"
     assert saved.continue_message == "resume now"
+
+
+def test_store_account_watcher_pause_metadata(tmp_path):
+    store = Store(tmp_path / "watcher.sqlite3")
+    account = store.create_account("work", str(tmp_path / "profile"))
+    watcher = store.ensure_account_watcher(account.id)
+
+    store.update_account_watcher_runtime(
+        watcher.id,
+        state="paused",
+        paused_at="2026-05-23T10:00:00+00:00",
+        paused_limit="five_hour",
+        paused_until="2026-05-23T12:00:00+00:00",
+    )
+    paused = store.get_account_watcher(watcher.id)
+
+    assert paused.paused_limit == "five_hour"
+    assert paused.paused_until == "2026-05-23T12:00:00+00:00"
+
+    store.update_account_watcher_runtime(watcher.id, state="active", clear_pause=True)
+
+    active = store.get_account_watcher(watcher.id)
+    assert active.paused_at is None
+    assert active.paused_limit is None
+    assert active.paused_until is None
 
 
 def test_store_session_selection_survives_discovery_upsert(tmp_path):

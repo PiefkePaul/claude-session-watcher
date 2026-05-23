@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from .pause_templates import CUSTOM_TEMPLATE, DEFAULT_PAUSE_MESSAGE
+
 
 def utc_now() -> str:
     return datetime.now(UTC).isoformat()
@@ -31,10 +33,8 @@ class Watcher:
     seven_day_threshold: float = 98.0
     resume_threshold: float = 5.0
     check_interval_seconds: int = 60
-    pause_message: str = (
-        "Pause after the current safe checkpoint. Do not start new work. "
-        "Wait until I send continue."
-    )
+    pause_template: str = CUSTOM_TEMPLATE
+    pause_message: str = DEFAULT_PAUSE_MESSAGE
     continue_message: str = "continue"
     last_usage_json: str | None = None
     last_reason: str | None = None
@@ -54,11 +54,12 @@ class AccountWatcher:
     seven_day_threshold: float = 98.0
     resume_threshold: float = 5.0
     check_interval_seconds: int = 60
-    pause_message: str = (
-        "Pause after the current safe checkpoint. Do not start new work. "
-        "Wait until I send continue."
-    )
+    pause_template: str = CUSTOM_TEMPLATE
+    pause_message: str = DEFAULT_PAUSE_MESSAGE
     continue_message: str = "continue"
+    paused_at: str | None = None
+    paused_limit: str | None = None
+    paused_until: str | None = None
     last_usage_json: str | None = None
     last_reason: str | None = None
     last_error: str | None = None

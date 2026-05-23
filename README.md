@@ -16,6 +16,9 @@ Early MVP. The core pieces are present:
 - account-based 5-hour and 7-day usage checks
 - selectable sessions under each account
 - best-effort session discovery from the Claude Code dashboard
+- reset-aware resume with a configurable safety margin
+- pause templates for minimal, worklog, and handoff-style checkpoints
+- optional ntfy notifications
 - pause/continue state machine
 - Docker image and compose file
 - CLI status/check/log/service commands and thin npm launcher
@@ -108,7 +111,7 @@ csw discover PC
 csw add main --account PC --remote-url https://claude.ai/code/...
 csw session-enable main
 csw session-disable main
-csw edit PC --check-interval 120
+csw edit PC --check-interval 120 --pause-template worklog
 csw enable PC
 csw disable PC
 ```
@@ -126,6 +129,8 @@ Run a basic environment check:
 
 ```bash
 csw doctor
+csw doctor --account PC
+csw notify-test
 ```
 
 ## Start Claude Code With Remote Control
@@ -150,8 +155,11 @@ Environment variables:
 | `CSW_CAMOUFOX_HEADLESS` | `virtual` | Camoufox headless mode |
 | `CSW_CAMOUFOX_OS` | unset | Optional Camoufox fingerprint OS |
 | `CSW_BROWSER_KEEPALIVE` | `false` | Keep Camoufox open between checks |
+| `CSW_RESUME_SAFETY_MARGIN_SECONDS` | `120` | Extra wait after a known reset before continue |
 | `CSW_UI_TOKEN` | unset | Token required for protected web/API access |
 | `CSW_LOCAL_PORT_BIND_ONLY` | `false` | Allows container-internal `0.0.0.0` only when host port is locally bound |
+| `CSW_NOTIFY_NTFY_URL` | unset | Optional ntfy topic URL for notifications |
+| `CSW_NOTIFY_NTFY_TOKEN` | unset | Optional bearer token for protected ntfy topics |
 
 Watcher defaults:
 
@@ -160,6 +168,16 @@ Watcher defaults:
 | 5-hour pause threshold | `95%` |
 | 7-day pause threshold | `98%` |
 | Check interval | `60s` |
+| Resume safety margin | `120s` |
+
+Pause templates:
+
+| Template | Purpose |
+| --- | --- |
+| `custom` | Use the configured pause message as-is |
+| `minimal` | Stop after a safe checkpoint |
+| `worklog` | Ask Claude to update `WORKLOG.md` before pausing |
+| `handoff` | Ask Claude to write a handoff for another agent or later resume |
 
 ## Security Notes
 

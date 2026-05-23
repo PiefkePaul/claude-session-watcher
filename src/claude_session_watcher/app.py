@@ -15,6 +15,7 @@ from .browser import CamoufoxManager
 from .discovery import ClaudeSessionDiscoveryProvider, SessionDiscoveryService
 from .formatting import build_ui_watcher
 from .models import Account, AccountWatcher, ClaudeSession, Watcher, utc_now
+from .pause_templates import pause_template_options
 from .settings import Settings
 from .store import Store
 from .watcher import WatcherService
@@ -80,6 +81,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "accounts": account_rows,
                 "events": events,
                 "data_dir": settings.data_dir,
+                "pause_templates": pause_template_options(),
             },
         )
 
@@ -122,6 +124,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         five_hour_threshold: float = Form(95.0),
         seven_day_threshold: float = Form(98.0),
         check_interval_seconds: int = Form(60),
+        pause_template: str = Form("custom"),
         pause_message: str = Form(...),
         continue_message: str = Form("continue"),
     ):
@@ -135,6 +138,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             seven_day_threshold=seven_day_threshold,
             resume_threshold=existing.resume_threshold,
             check_interval_seconds=check_interval_seconds,
+            pause_template=pause_template,
             pause_message=pause_message,
             continue_message=continue_message,
             last_usage_json=existing.last_usage_json,
@@ -268,6 +272,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             seven_day_threshold=seven_day_threshold,
             resume_threshold=existing.resume_threshold,
             check_interval_seconds=check_interval_seconds,
+            pause_template=existing.pause_template,
             pause_message=pause_message,
             continue_message=continue_message,
         )
@@ -438,9 +443,13 @@ def _api_account_watcher(store: Store, watcher: AccountWatcher) -> dict[str, obj
         "enabled": watcher.enabled,
         "state": watcher.state,
         "five_hour_threshold": watcher.five_hour_threshold,
-        "seven_day_threshold": watcher.seven_day_threshold,
-        "check_interval_seconds": watcher.check_interval_seconds,
-        "five_hour": ui.five_hour.utilization,
+            "seven_day_threshold": watcher.seven_day_threshold,
+            "check_interval_seconds": watcher.check_interval_seconds,
+            "pause_template": watcher.pause_template,
+            "paused_at": watcher.paused_at,
+            "paused_limit": watcher.paused_limit,
+            "paused_until": watcher.paused_until,
+            "five_hour": ui.five_hour.utilization,
         "seven_day": ui.seven_day.utilization,
         "reset_5h": ui.five_hour.reset_display,
         "reset_7d": ui.seven_day.reset_display,

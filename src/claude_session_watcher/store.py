@@ -15,6 +15,9 @@ from .models import (
     WatcherEvent,
     utc_now,
 )
+from .pause_templates import CUSTOM_TEMPLATE
+
+_UNSET = object()
 
 
 class Store:
@@ -55,6 +58,7 @@ class Store:
                     seven_day_threshold REAL NOT NULL DEFAULT 98.0,
                     resume_threshold REAL NOT NULL DEFAULT 5.0,
                     check_interval_seconds INTEGER NOT NULL DEFAULT 60,
+                    pause_template TEXT NOT NULL DEFAULT 'custom',
                     pause_message TEXT NOT NULL,
                     continue_message TEXT NOT NULL DEFAULT 'continue',
                     last_usage_json TEXT,
@@ -82,8 +86,12 @@ class Store:
                     seven_day_threshold REAL NOT NULL DEFAULT 98.0,
                     resume_threshold REAL NOT NULL DEFAULT 5.0,
                     check_interval_seconds INTEGER NOT NULL DEFAULT 60,
+                    pause_template TEXT NOT NULL DEFAULT 'custom',
                     pause_message TEXT NOT NULL,
                     continue_message TEXT NOT NULL DEFAULT 'continue',
+                    paused_at TEXT,
+                    paused_limit TEXT,
+                    paused_until TEXT,
                     last_usage_json TEXT,
                     last_reason TEXT,
                     last_error TEXT,
@@ -122,7 +130,38 @@ class Store:
                 );
                 """
             )
+            self._ensure_columns(
+                conn,
+                "watchers",
+                {
+                    "pause_template": "TEXT NOT NULL DEFAULT 'custom'",
+                },
+            )
+            self._ensure_columns(
+                conn,
+                "account_watchers",
+                {
+                    "pause_template": "TEXT NOT NULL DEFAULT 'custom'",
+                    "paused_at": "TEXT",
+                    "paused_limit": "TEXT",
+                    "paused_until": "TEXT",
+                },
+            )
         self._migrate_legacy_watchers()
+
+    @staticmethod
+    def _ensure_columns(
+        conn: sqlite3.Connection,
+        table: str,
+        columns: dict[str, str],
+    ) -> None:
+        existing = {
+            row["name"]
+            for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
+        }
+        for name, definition in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
 
     @staticmethod
     def _account_from_row(row: sqlite3.Row) -> Account:
@@ -149,6 +188,7 @@ class Store:
             seven_day_threshold=row["seven_day_threshold"],
             resume_threshold=row["resume_threshold"],
             check_interval_seconds=row["check_interval_seconds"],
+            pause_template=row["pause_template"],
             pause_message=row["pause_message"],
             continue_message=row["continue_message"],
             last_usage_json=row["last_usage_json"],
@@ -170,8 +210,12 @@ class Store:
             seven_day_threshold=row["seven_day_threshold"],
             resume_threshold=row["resume_threshold"],
             check_interval_seconds=row["check_interval_seconds"],
+            pause_template=row["pause_template"],
             pause_message=row["pause_message"],
             continue_message=row["continue_message"],
+            paused_at=row["paused_at"],
+            paused_limit=row["paused_limit"],
+            paused_until=row["paused_until"],
             last_usage_json=row["last_usage_json"],
             last_reason=row["last_reason"],
             last_error=row["last_error"],
@@ -245,11 +289,11 @@ class Store:
                         INSERT OR IGNORE INTO account_watchers (
                             account_id, enabled, state,
                             five_hour_threshold, seven_day_threshold, resume_threshold,
-                            check_interval_seconds, pause_message, continue_message,
+                            check_interval_seconds, pause_template, pause_message, continue_message,
                             last_usage_json, last_reason, last_error, last_checked_at,
                             created_at, updated_at
                         )
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             row["account_id"],
@@ -259,6 +303,7 @@ class Store:
                             row["seven_day_threshold"],
                             row["resume_threshold"],
                             row["check_interval_seconds"],
+                            row["pause_template"],
                             row["pause_message"],
                             row["continue_message"],
                             row["last_usage_json"],
@@ -353,14 +398,15 @@ class Store:
             conn.execute(
                 """
                 INSERT OR IGNORE INTO account_watchers (
-                    account_id, created_at, updated_at, pause_message
+                    account_id, created_at, updated_at, pause_template, pause_message
                 )
-                VALUES (?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     account_id,
                     now,
                     now,
+                    CUSTOM_TEMPLATE,
                     AccountWatcher(id=None, account_id=account_id).pause_message,
                 ),
             )
@@ -410,7 +456,7 @@ class Store:
                 SET enabled = ?, state = ?,
                     five_hour_threshold = ?, seven_day_threshold = ?,
                     resume_threshold = ?, check_interval_seconds = ?,
-                    pause_message = ?, continue_message = ?, updated_at = ?
+                    pause_template = ?, pause_message = ?, continue_message = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
@@ -420,6 +466,7 @@ class Store:
                     watcher.seven_day_threshold,
                     watcher.resume_threshold,
                     watcher.check_interval_seconds,
+                    watcher.pause_template,
                     watcher.pause_message,
                     watcher.continue_message,
                     utc_now(),
@@ -443,13 +490,27 @@ class Store:
         last_usage_json: str | None = None,
         last_reason: str | None = None,
         last_error: str | None = None,
+        paused_at: str | None | object = _UNSET,
+        paused_limit: str | None | object = _UNSET,
+        paused_until: str | None | object = _UNSET,
+        clear_pause: bool = False,
     ) -> None:
         watcher = self.get_account_watcher(account_watcher_id)
+        next_paused_at = None if clear_pause else watcher.paused_at
+        next_paused_limit = None if clear_pause else watcher.paused_limit
+        next_paused_until = None if clear_pause else watcher.paused_until
+        if paused_at is not _UNSET:
+            next_paused_at = paused_at
+        if paused_limit is not _UNSET:
+            next_paused_limit = paused_limit
+        if paused_until is not _UNSET:
+            next_paused_until = paused_until
         with self._connect() as conn:
             conn.execute(
                 """
                 UPDATE account_watchers
                 SET state = ?, last_usage_json = ?, last_reason = ?, last_error = ?,
+                    paused_at = ?, paused_limit = ?, paused_until = ?,
                     last_checked_at = ?, updated_at = ?
                 WHERE id = ?
                 """,
@@ -458,6 +519,9 @@ class Store:
                     last_usage_json if last_usage_json is not None else watcher.last_usage_json,
                     last_reason,
                     last_error,
+                    next_paused_at,
+                    next_paused_limit,
+                    next_paused_until,
                     utc_now(),
                     utc_now(),
                     account_watcher_id,
@@ -643,10 +707,10 @@ class Store:
                 INSERT INTO watchers (
                     name, account_id, remote_url, enabled, state,
                     five_hour_threshold, seven_day_threshold, resume_threshold,
-                    check_interval_seconds, pause_message, continue_message,
+                    check_interval_seconds, pause_template, pause_message, continue_message,
                     created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     watcher.name,
@@ -658,6 +722,7 @@ class Store:
                     watcher.seven_day_threshold,
                     watcher.resume_threshold,
                     watcher.check_interval_seconds,
+                    watcher.pause_template,
                     watcher.pause_message,
                     watcher.continue_message,
                     now,
@@ -678,6 +743,7 @@ class Store:
                 seven_day_threshold=saved.seven_day_threshold,
                 resume_threshold=saved.resume_threshold,
                 check_interval_seconds=saved.check_interval_seconds,
+                pause_template=saved.pause_template,
                 pause_message=saved.pause_message,
                 continue_message=saved.continue_message,
             ),
@@ -731,7 +797,7 @@ class Store:
                 SET name = ?, account_id = ?, remote_url = ?, enabled = ?,
                     five_hour_threshold = ?, seven_day_threshold = ?,
                     resume_threshold = ?, check_interval_seconds = ?,
-                    pause_message = ?, continue_message = ?, updated_at = ?
+                    pause_template = ?, pause_message = ?, continue_message = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
@@ -743,6 +809,7 @@ class Store:
                     watcher.seven_day_threshold,
                     watcher.resume_threshold,
                     watcher.check_interval_seconds,
+                    watcher.pause_template,
                     watcher.pause_message,
                     watcher.continue_message,
                     utc_now(),

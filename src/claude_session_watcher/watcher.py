@@ -8,6 +8,7 @@ from .browser import CamoufoxManager
 from .controller import BrowserSessionController, SessionController
 from .engine import WatcherEngine
 from .models import Account, AccountWatcher, Watcher
+from .notifications import NotificationEvent, Notifier, notifier_from_settings
 from .providers import (
     CamoufoxBrowserUsageProvider,
     CamoufoxCookiesHttpUsageProvider,
@@ -28,6 +29,7 @@ class WatcherService:
         usage_provider: UsageProvider | None = None,
         session_controller: SessionController | None = None,
         engine: WatcherEngine | None = None,
+        notifier: Notifier | None = None,
     ):
         self.store = store
         self.browser = browser
@@ -40,7 +42,10 @@ class WatcherService:
             browser,
             keepalive=settings.browser_keepalive,
         )
-        self.engine = engine or WatcherEngine()
+        self.engine = engine or WatcherEngine(
+            resume_safety_margin_seconds=getattr(settings, "resume_safety_margin_seconds", 120)
+        )
+        self.notifier = notifier or notifier_from_settings(settings)
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
         self._next_due: dict[int, float] = {}
@@ -91,6 +96,12 @@ class WatcherService:
                         last_error=str(exc),
                     )
                     self.store.add_account_event(watcher.id, "error", str(exc))
+                    await self._notify(
+                        "watcher_error",
+                        "Claude Session Watcher error",
+                        str(exc),
+                        level="error",
+                    )
                 finally:
                     jitter = random.randint(0, max(0, self.settings.check_jitter_seconds))
                     self._next_due[watcher.id] = (
@@ -121,9 +132,19 @@ class WatcherService:
             last_usage_json=raw_json,
             last_reason=decision.reason,
             last_error=None,
+            paused_at=decision.paused_at,
+            paused_limit=decision.paused_limit,
+            paused_until=decision.paused_until,
+            clear_pause=decision.clear_pause,
         )
         if decision.event_level and decision.event_message:
             self.store.add_account_event(watcher.id, decision.event_level, decision.event_message)
+            await self._notify(
+                decision.action,
+                f"Claude watcher {decision.action}",
+                decision.event_message,
+                level=decision.event_level,
+            )
         return decision.action
 
     async def _send(self, watcher: Watcher, account: Account, message: str) -> None:
@@ -140,6 +161,12 @@ class WatcherService:
         sessions = self.store.list_watched_sessions(account.id)
         if not sessions:
             self.store.add_account_event(watcher.id, "warning", "No selected sessions enabled")
+            await self._notify(
+                "no_selected_sessions",
+                "No selected Claude sessions",
+                "The account watcher wanted to send a command, but no sessions are selected.",
+                level="warning",
+            )
             return
         for session in sessions:
             if session.id is None:
@@ -150,6 +177,12 @@ class WatcherService:
                     "warning",
                     f"Skipped unavailable session: {session.title}",
                     session_id=session.id,
+                )
+                await self._notify(
+                    "session_skipped",
+                    "Claude session skipped",
+                    f"Skipped unavailable session: {session.title}",
+                    level="warning",
                 )
                 continue
             try:
@@ -163,3 +196,22 @@ class WatcherService:
                     f"Could not control session {session.title}: {exc}",
                     session_id=session.id,
                 )
+                await self._notify(
+                    "remote_failed",
+                    "Claude remote control failed",
+                    f"Could not control session {session.title}: {exc}",
+                    level="error",
+                )
+
+    async def _notify(self, event_type: str, title: str, message: str, *, level: str) -> None:
+        try:
+            await self.notifier.notify(
+                NotificationEvent(
+                    event_type=event_type,
+                    title=title,
+                    message=message,
+                    level=level,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - notifications must not stop watcher loops
+            print(f"Notification failed: {exc}")

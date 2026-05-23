@@ -7,11 +7,15 @@ import subprocess
 import sys
 import time
 import webbrowser
+from pathlib import Path
 
 from .browser import CamoufoxManager
 from .discovery import ClaudeSessionDiscoveryProvider, SessionDiscoveryService
 from .formatting import build_ui_watcher
 from .models import AccountWatcher, ClaudeSession, utc_now
+from .notifications import NotificationEvent, notifier_from_settings
+from .pause_templates import CUSTOM_TEMPLATE, PAUSE_TEMPLATES
+from .profile_cookies import load_claude_cookies
 from .service_control import service_status, start_service, stop_service
 from .settings import Settings
 from .store import Store
@@ -68,7 +72,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "service-status":
         return _print_service_status(service_status(settings), ok_when_stopped=True)
     if args.command == "doctor":
-        return _doctor(settings)
+        return _doctor(args, settings)
+    if args.command == "notify-test":
+        return asyncio.run(_notify_test(settings))
 
     parser.print_help()
     return 0
@@ -141,7 +147,9 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("stop", help="Stop the local background service")
     subparsers.add_parser("restart", help="Restart the local background service")
     subparsers.add_parser("service-status", help="Show local background service status")
-    subparsers.add_parser("doctor", help="Run basic environment checks")
+    doctor = subparsers.add_parser("doctor", help="Run basic environment checks")
+    doctor.add_argument("--account", help="Check login cookies for an account id or name")
+    subparsers.add_parser("notify-test", help="Send a test notification if configured")
     return parser
 
 
@@ -149,6 +157,11 @@ def _add_watcher_fields(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--five-hour-threshold", type=float, default=None)
     parser.add_argument("--seven-day-threshold", type=float, default=None)
     parser.add_argument("--check-interval", type=int, default=None)
+    parser.add_argument(
+        "--pause-template",
+        choices=[CUSTOM_TEMPLATE, *PAUSE_TEMPLATES.keys()],
+        default=None,
+    )
     parser.add_argument("--pause-message", default=None)
     parser.add_argument("--continue-message", default=None)
 
@@ -205,6 +218,8 @@ def _status_rows(settings: Settings) -> list[dict[str, object]]:
                 "reason": watcher.last_reason,
                 "error": watcher.last_error,
                 "usage_source": ui.usage_source,
+                "pause_template": watcher.pause_template,
+                "paused_until": watcher.paused_until,
             }
         )
     return rows
@@ -364,6 +379,7 @@ def _apply_account_watcher_args(
         seven_day_threshold=args.seven_day_threshold or watcher.seven_day_threshold,
         resume_threshold=watcher.resume_threshold,
         check_interval_seconds=args.check_interval or watcher.check_interval_seconds,
+        pause_template=args.pause_template or watcher.pause_template,
         pause_message=args.pause_message or watcher.pause_message,
         continue_message=args.continue_message or watcher.continue_message,
         last_usage_json=watcher.last_usage_json,
@@ -550,13 +566,41 @@ def _print_service_status(status, *, ok_when_stopped: bool) -> int:
     return 0 if status.running or ok_when_stopped else 1
 
 
-def _doctor(settings: Settings) -> int:
+def _doctor(args, settings: Settings) -> int:
     checks: list[tuple[str, bool, str]] = []
     settings.ensure_dirs()
     checks.append(("data dir", settings.data_dir.exists(), str(settings.data_dir)))
+    checks.append(
+        ("data dir writable", _doctor_writable(settings.data_dir), str(settings.data_dir))
+    )
     checks.append(("db", settings.db_path.parent.exists(), str(settings.db_path)))
     checks.append(("profiles dir", settings.profiles_dir.exists(), str(settings.profiles_dir)))
     checks.append(("web security", _doctor_web_security(settings), settings.host))
+    checks.append(
+        (
+            "notifications",
+            True,
+            "ntfy configured" if settings.notify_ntfy_url else "not configured",
+        )
+    )
+    try:
+        store = _store(settings)
+        accounts = store.list_accounts()
+        sessions = store.list_sessions()
+        selected_sessions = sum(1 for session in sessions if session.watch_enabled)
+        checks.append(("accounts", True, str(len(accounts))))
+        checks.append(("selected sessions", True, f"{selected_sessions}/{len(sessions)}"))
+        if getattr(args, "account", None):
+            account = _resolve_account(store, args.account)
+            try:
+                cookies = load_claude_cookies(Path(account.profile_dir))
+                checks.append(
+                    ("account cookies", True, f"{account.name}: {len(cookies)} Claude cookies")
+                )
+            except Exception as exc:  # noqa: BLE001
+                checks.append(("account cookies", False, f"{account.name}: {exc}"))
+    except Exception as exc:  # noqa: BLE001
+        checks.append(("db readable", False, str(exc)))
     try:
         import camoufox  # noqa: F401
 
@@ -568,12 +612,38 @@ def _doctor(settings: Settings) -> int:
     return 0 if all(ok for _, ok, _ in checks) else 1
 
 
+def _doctor_writable(path) -> bool:
+    marker = path / ".doctor-write-test"
+    try:
+        marker.write_text("ok", encoding="utf-8")
+        marker.unlink(missing_ok=True)
+        return True
+    except OSError:
+        return False
+
+
 def _doctor_web_security(settings: Settings) -> bool:
     try:
         settings.validate_web_security()
         return True
     except ValueError:
         return False
+
+
+async def _notify_test(settings: Settings) -> int:
+    if not settings.notify_ntfy_url:
+        print("Notifications are not configured. Set CSW_NOTIFY_NTFY_URL.")
+        return 1
+    notifier = notifier_from_settings(settings)
+    await notifier.notify(
+        NotificationEvent(
+            event_type="test",
+            title="Claude Session Watcher",
+            message="Test notification from Claude Session Watcher.",
+        )
+    )
+    print("Notification sent.")
+    return 0
 
 
 if __name__ == "__main__":
