@@ -2,7 +2,7 @@
 
 Background watcher for Claude Code Remote Control sessions.
 
-It runs a small local service with a web UI, keeps a pinned Camoufox browser profile per Claude account, reads Claude usage from that authenticated browser session, and sends pause/continue prompts into the configured Remote Control session before hard limits interrupt work.
+It runs a small local service with a web UI, keeps a pinned Camoufox browser profile per Claude account, reads Claude usage from that authenticated browser session, and sends pause/continue prompts into selected Claude Code Remote Control sessions before hard limits interrupt work.
 
 ## Status
 
@@ -13,7 +13,9 @@ Early MVP. The core pieces are present:
 - one Camoufox profile per Claude account
 - lightweight usage checks from authenticated browser profile cookies
 - browser fallback for Claude Web/API changes
-- 5-hour and 7-day usage checks
+- account-based 5-hour and 7-day usage checks
+- selectable sessions under each account
+- best-effort session discovery from the Claude Code dashboard
 - pause/continue state machine
 - Docker image and compose file
 - CLI status/check/log/service commands and thin npm launcher
@@ -25,10 +27,12 @@ Remote Control UI selectors may need adjustment when Claude's web UI changes.
 The intended workflow is one long-running Claude Code session:
 
 1. Start Claude Code locally with Remote Control enabled.
-2. Connect the watcher to that Remote Control URL.
-3. The watcher monitors usage in the background.
-4. At 95% of the 5-hour limit or 98% of the weekly limit, it sends a pause instruction.
-5. It resumes when no watched limit is still at or above its configured pause threshold.
+2. Add the Claude account to the watcher.
+3. Discover or manually add the Remote Control session URL.
+4. Select only the sessions that should receive pause/continue commands.
+5. The account watcher monitors usage in the background.
+6. At 95% of the 5-hour limit or 98% of the weekly limit, it sends a pause instruction to selected controllable sessions.
+7. It resumes selected sessions when no watched limit is still at or above its configured pause threshold.
 
 The browser `sessionKey` is not entered manually in the normal flow. The watcher reads Claude cookies from the Camoufox profile after you log in and uses direct HTTP usage checks whenever possible.
 
@@ -83,12 +87,13 @@ The compose file binds the UI to `127.0.0.1:47831` on the host by default.
 1. Add an account in the web UI.
 2. Click `Open login`.
 3. Sign in to Claude in the Camoufox window.
-4. Add a watcher with a Claude Remote Control URL.
-5. Leave the service running.
+4. Click `Discover` or manually add a Claude Remote Control URL as a session.
+5. Select the sessions that should receive pause/continue commands.
+6. Leave the service running.
 
 The watcher uses the authenticated Camoufox browser profile for usage checks. It does not require you to copy `CLAUDE_SESSION_KEY`.
 After login you can close the visible Camoufox window. Later checks read cookies directly and only reopen Camoufox when a browser fallback or Remote Control prompt send is needed.
-Existing watchers can be edited from the dashboard to change the account, Remote Control URL, thresholds, check interval, enabled state, and pause/continue messages.
+Account watchers can be edited from the dashboard to change thresholds, check interval, enabled state, and pause/continue messages. Sessions are selected independently; unselected sessions are displayed but never receive pause/continue commands.
 
 ## CLI
 
@@ -98,10 +103,14 @@ csw status --json
 csw watch
 csw check --all
 csw logs
+csw sessions PC
+csw discover PC
 csw add main --account PC --remote-url https://claude.ai/code/...
-csw edit main --check-interval 120
-csw enable main
-csw disable main
+csw session-enable main
+csw session-disable main
+csw edit PC --check-interval 120
+csw enable PC
+csw disable PC
 ```
 
 Local background process helpers:

@@ -16,5 +16,6 @@ def test_cli_status_json(monkeypatch, tmp_path, capsys):
     assert main(["status", "--json"]) == 0
 
     data = json.loads(capsys.readouterr().out)
-    assert data[0]["name"] == "main"
+    assert data[0]["account"] == "work"
     assert data[0]["enabled"] is True
+    assert data[0]["sessions_watched"] == 1

@@ -10,14 +10,14 @@
     <header class="topbar">
       <div>
         <h1>Claude Session Watcher</h1>
-        <p>Background monitoring for Claude Code Remote Control sessions.</p>
+        <p>Account-based monitoring for selected Claude Code sessions.</p>
       </div>
       <a class="button secondary" href="/health">Health</a>
     </header>
 
     <main class="layout">
       <section class="panel">
-        <h2>Accounts</h2>
+        <h2>Add Account</h2>
         <form class="inline-form" action="/accounts" method="post">
           <label>
             Account name
@@ -25,147 +25,223 @@
           </label>
           <button type="submit">Add account</button>
         </form>
-
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Status</th>
-                <th>Profile</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for account in accounts %}
-              <tr>
-                <td>{{ account.name }}</td>
-                <td><span class="status">{{ account.status }}</span></td>
-                <td class="path">{{ account.profile_dir }}</td>
-                <td>
-                  <form action="/accounts/{{ account.id }}/login" method="post">
-                    <button type="submit" class="secondary">Open login</button>
-                  </form>
-                </td>
-              </tr>
-              {% else %}
-              <tr><td colspan="4" class="empty">No accounts yet.</td></tr>
-              {% endfor %}
-            </tbody>
-          </table>
-        </div>
+        <p class="empty">Data directory: <span class="path">{{ data_dir }}</span></p>
       </section>
 
       <section class="panel">
-        <h2>New watcher</h2>
-        <form class="watcher-form" action="/watchers" method="post">
-          <label>
-            Name
-            <input name="name" placeholder="main-project" required />
-          </label>
-          <label>
-            Account
-            <select name="account_id" required>
-              {% for account in accounts %}
-              <option value="{{ account.id }}">{{ account.name }}</option>
-              {% endfor %}
-            </select>
-          </label>
-          <label class="wide">
-            Remote Control URL
-            <input name="remote_url" placeholder="https://claude.ai/code/..." required />
-          </label>
-          <label>
-            5h threshold
-            <input name="five_hour_threshold" type="number" value="95" min="1" max="100" step="0.1" />
-          </label>
-          <label>
-            7d threshold
-            <input name="seven_day_threshold" type="number" value="98" min="1" max="100" step="0.1" />
-          </label>
-          <label>
-            Check interval
-            <input name="check_interval_seconds" type="number" value="60" min="10" />
-          </label>
-          <label class="wide">
-            Pause message
-            <textarea name="pause_message" rows="3">Pause after the current safe checkpoint. Do not start new work. Wait until I send continue.</textarea>
-          </label>
-          <label class="wide">
-            Continue message
-            <input name="continue_message" value="continue" />
-          </label>
-          <button type="submit">Create watcher</button>
-        </form>
+        <h2>Selection Rule</h2>
+        <p class="empty">
+          Limit checks run per Claude account. Pause and continue commands are sent only to
+          sessions explicitly enabled below.
+        </p>
       </section>
 
       <section class="panel wide-panel">
-        <h2>Watchers</h2>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>State</th>
-                <th>Enabled</th>
-                <th>5h</th>
-                <th>7d</th>
-                <th>Reason</th>
-                <th>Source</th>
-                <th>Last check</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {% for watcher in watchers %}
-              <tr>
-                <td>{{ watcher.watcher.name }}</td>
-                <td><span class="status {{ watcher.watcher.state }}">{{ watcher.watcher.state }}</span></td>
-                <td>{{ "yes" if watcher.watcher.enabled else "no" }}</td>
-                <td>
-                  {% if watcher.five_hour.utilization is not none %}
-                  <span class="metric">{{ "%.1f"|format(watcher.five_hour.utilization) }}%</span>
-                  {% if watcher.five_hour.reset_display %}
-                  <span class="muted">reset {{ watcher.five_hour.reset_display }}</span>
-                  {% endif %}
-                  {% endif %}
-                </td>
-                <td>
-                  {% if watcher.seven_day.utilization is not none %}
-                  <span class="metric">{{ "%.1f"|format(watcher.seven_day.utilization) }}%</span>
-                  {% if watcher.seven_day.reset_display %}
-                  <span class="muted">reset {{ watcher.seven_day.reset_display }}</span>
-                  {% endif %}
-                  {% endif %}
-                </td>
-                <td>{{ watcher.watcher.last_reason or "" }}</td>
-                <td>{{ watcher.usage_source }}</td>
-                <td><span class="timestamp">{{ watcher.last_checked_display }}</span></td>
-                <td class="actions">
-                  <a class="button secondary" href="/watchers/{{ watcher.watcher.id }}/edit">Edit</a>
-                  <form action="/watchers/{{ watcher.watcher.id }}/check" method="post"><button class="secondary">Check</button></form>
-                  {% if watcher.watcher.enabled %}
-                  <form action="/watchers/{{ watcher.watcher.id }}/disable" method="post"><button class="danger">Disable</button></form>
-                  {% else %}
-                  <form action="/watchers/{{ watcher.watcher.id }}/enable" method="post"><button class="secondary">Enable</button></form>
-                  {% endif %}
-                </td>
-              </tr>
+        <h2>Accounts And Sessions</h2>
+
+        {% for row in accounts %}
+        <div class="account-block">
+          <div class="account-head">
+            <div>
+              <h3>{{ row.account.name }}</h3>
+              <p>
+                <span class="status">{{ row.account.status }}</span>
+                <span class="muted inline">
+                  {{ row.watched_count }}/{{ row.session_count }} sessions selected
+                </span>
+              </p>
+              <p class="path">{{ row.account.profile_dir }}</p>
+            </div>
+            <div class="actions">
+              <form action="/accounts/{{ row.account.id }}/login" method="post">
+                <button type="submit" class="secondary">Open login</button>
+              </form>
+              <form action="/accounts/{{ row.account.id }}/discover" method="post">
+                <button type="submit" class="secondary">Discover</button>
+              </form>
+              <form action="/account-watchers/{{ row.watcher.id }}/check" method="post">
+                <button type="submit" class="secondary">Check</button>
+              </form>
+              {% if row.watcher.enabled %}
+              <form action="/account-watchers/{{ row.watcher.id }}/disable" method="post">
+                <button type="submit" class="danger">Disable</button>
+              </form>
               {% else %}
-              <tr><td colspan="9" class="empty">No watchers yet.</td></tr>
-              {% endfor %}
-            </tbody>
-          </table>
+              <form action="/account-watchers/{{ row.watcher.id }}/enable" method="post">
+                <button type="submit" class="secondary">Enable</button>
+              </form>
+              {% endif %}
+            </div>
+          </div>
+
+          <div class="limit-grid">
+            <div>
+              <span class="label-text">State</span>
+              <span class="status {{ row.watcher.state }}">{{ row.watcher.state }}</span>
+            </div>
+            <div>
+              <span class="label-text">5h</span>
+              {% if row.ui.five_hour.utilization is not none %}
+              <span class="metric">{{ "%.1f"|format(row.ui.five_hour.utilization) }}%</span>
+              <span class="muted">reset {{ row.ui.five_hour.reset_display }}</span>
+              {% else %}
+              <span class="muted">unknown</span>
+              {% endif %}
+            </div>
+            <div>
+              <span class="label-text">7d</span>
+              {% if row.ui.seven_day.utilization is not none %}
+              <span class="metric">{{ "%.1f"|format(row.ui.seven_day.utilization) }}%</span>
+              <span class="muted">reset {{ row.ui.seven_day.reset_display }}</span>
+              {% else %}
+              <span class="muted">unknown</span>
+              {% endif %}
+            </div>
+            <div>
+              <span class="label-text">Last check</span>
+              <span class="timestamp">{{ row.ui.last_checked_display }}</span>
+            </div>
+            <div>
+              <span class="label-text">Source</span>
+              <span>{{ row.ui.usage_source }}</span>
+            </div>
+            <div>
+              <span class="label-text">Reason</span>
+              <span>{{ row.watcher.last_reason or "" }}</span>
+            </div>
+          </div>
+
+          <form
+            class="watcher-form compact-form"
+            action="/account-watchers/{{ row.watcher.id }}"
+            method="post"
+          >
+            <label class="checkbox-row">
+              <input name="enabled" type="checkbox" {% if row.watcher.enabled %}checked{% endif %} />
+              Enabled
+            </label>
+            <label>
+              5h threshold
+              <input
+                name="five_hour_threshold"
+                type="number"
+                value="{{ row.watcher.five_hour_threshold }}"
+                min="1"
+                max="100"
+                step="0.1"
+              />
+            </label>
+            <label>
+              7d threshold
+              <input
+                name="seven_day_threshold"
+                type="number"
+                value="{{ row.watcher.seven_day_threshold }}"
+                min="1"
+                max="100"
+                step="0.1"
+              />
+            </label>
+            <label>
+              Check interval
+              <input
+                name="check_interval_seconds"
+                type="number"
+                value="{{ row.watcher.check_interval_seconds }}"
+                min="10"
+              />
+            </label>
+            <label class="wide">
+              Pause message
+              <textarea name="pause_message" rows="2">{{ row.watcher.pause_message }}</textarea>
+            </label>
+            <label class="wide">
+              Continue message
+              <input name="continue_message" value="{{ row.watcher.continue_message }}" />
+            </label>
+            <button type="submit">Save account watcher</button>
+          </form>
+
+          <div class="session-head">
+            <h3>Sessions</h3>
+            <span class="muted inline">Only selected sessions receive commands.</span>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Selected</th>
+                  <th>Title</th>
+                  <th>Kind</th>
+                  <th>Status</th>
+                  <th>Control</th>
+                  <th>Last seen</th>
+                  <th>Last control error</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for session in row.sessions %}
+                <tr>
+                  <td>{{ "yes" if session.watch_enabled else "no" }}</td>
+                  <td>
+                    <span class="metric">{{ session.title }}</span>
+                    <span class="path">{{ session.session_key }}</span>
+                  </td>
+                  <td>{{ session.kind }}</td>
+                  <td><span class="status">{{ session.status }}</span></td>
+                  <td>{{ "yes" if session.control_supported else "no" }}</td>
+                  <td>{{ session.last_seen_at or "" }}</td>
+                  <td>{{ session.last_control_error or "" }}</td>
+                  <td class="actions">
+                    <a class="button secondary" href="{{ session.url }}" target="_blank" rel="noreferrer">Open</a>
+                    {% if session.watch_enabled %}
+                    <form action="/sessions/{{ session.id }}/disable" method="post">
+                      <button type="submit" class="danger">Unselect</button>
+                    </form>
+                    {% else %}
+                    <form action="/sessions/{{ session.id }}/enable" method="post">
+                      <button type="submit" class="secondary">Select</button>
+                    </form>
+                    {% endif %}
+                  </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="8" class="empty">No sessions discovered or added yet.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+
+          <form class="watcher-form session-form" action="/sessions" method="post">
+            <input name="account_id" type="hidden" value="{{ row.account.id }}" />
+            <label>
+              Session title
+              <input name="title" placeholder="main-project" required />
+            </label>
+            <label class="wide">
+              Remote Control URL
+              <input name="remote_url" placeholder="https://claude.ai/code/..." required />
+            </label>
+            <label class="checkbox-row">
+              <input name="watch_enabled" type="checkbox" checked />
+              Select for watching
+            </label>
+            <button type="submit">Add session</button>
+          </form>
         </div>
+        {% else %}
+        <p class="empty">No accounts yet.</p>
+        {% endfor %}
       </section>
 
       <section class="panel wide-panel">
-        <h2>Recent events</h2>
+        <h2>Recent Events</h2>
         <div class="events">
           {% for event in events %}
           <div class="event {{ event.level }}">
             <time>{{ event.created_at }}</time>
-            <span>#{{ event.watcher_id }}</span>
+            <span>#{{ event.account_watcher_id }}{% if event.session_id %}/{{ event.session_id }}{% endif %}</span>
             <p>{{ event.message }}</p>
           </div>
           {% else %}

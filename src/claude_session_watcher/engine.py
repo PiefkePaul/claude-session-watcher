@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from .models import Watcher
+from .models import AccountWatcher, Watcher
 from .usage import UsageSnapshot
 
 WatcherAction = Literal["paused", "continued", "waiting", "ok"]
@@ -20,7 +20,7 @@ class WatcherDecision:
 
 
 class WatcherEngine:
-    def decide(self, watcher: Watcher, usage: UsageSnapshot) -> WatcherDecision:
+    def decide(self, watcher: Watcher | AccountWatcher, usage: UsageSnapshot) -> WatcherDecision:
         pause_reason = usage.is_pause_required(
             watcher.five_hour_threshold,
             watcher.seven_day_threshold,

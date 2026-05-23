@@ -45,9 +45,61 @@ class Watcher:
 
 
 @dataclass(slots=True)
+class AccountWatcher:
+    id: int | None
+    account_id: int
+    enabled: bool = True
+    state: str = "active"
+    five_hour_threshold: float = 95.0
+    seven_day_threshold: float = 98.0
+    resume_threshold: float = 5.0
+    check_interval_seconds: int = 60
+    pause_message: str = (
+        "Pause after the current safe checkpoint. Do not start new work. "
+        "Wait until I send continue."
+    )
+    continue_message: str = "continue"
+    last_usage_json: str | None = None
+    last_reason: str | None = None
+    last_error: str | None = None
+    last_checked_at: str | None = None
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(slots=True)
+class ClaudeSession:
+    id: int | None
+    account_id: int
+    session_key: str
+    title: str
+    url: str
+    kind: str = "unknown"
+    status: str = "unknown"
+    watch_enabled: bool = False
+    control_supported: bool = False
+    raw_json: str | None = None
+    last_seen_at: str | None = None
+    last_checked_at: str | None = None
+    last_control_error: str | None = None
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(slots=True)
 class WatcherEvent:
     id: int | None
     watcher_id: int
+    level: str
+    message: str
+    created_at: str = ""
+
+
+@dataclass(slots=True)
+class AccountWatcherEvent:
+    id: int | None
+    account_watcher_id: int
+    session_id: int | None
     level: str
     message: str
     created_at: str = ""

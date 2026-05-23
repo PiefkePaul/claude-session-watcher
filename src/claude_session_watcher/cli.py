@@ -9,8 +9,9 @@ import time
 import webbrowser
 
 from .browser import CamoufoxManager
+from .discovery import ClaudeSessionDiscoveryProvider, SessionDiscoveryService
 from .formatting import build_ui_watcher
-from .models import Watcher
+from .models import AccountWatcher, ClaudeSession, utc_now
 from .service_control import service_status, start_service, stop_service
 from .settings import Settings
 from .store import Store
@@ -47,6 +48,16 @@ def main(argv: list[str] | None = None) -> int:
         return _set_enabled(args, settings, True)
     if args.command == "disable":
         return _set_enabled(args, settings, False)
+    if args.command == "sessions":
+        return _sessions(args, settings)
+    if args.command == "discover":
+        return asyncio.run(_discover(args, settings))
+    if args.command == "session-add":
+        return _session_add(args, settings)
+    if args.command == "session-enable":
+        return _set_session_enabled(args, settings, True)
+    if args.command == "session-disable":
+        return _set_session_enabled(args, settings, False)
     if args.command == "start":
         return _print_service_status(start_service(settings), ok_when_stopped=False)
     if args.command == "stop":
@@ -75,40 +86,56 @@ def _build_parser() -> argparse.ArgumentParser:
     subparsers.add_parser("open-ui", help="Open the configured local web UI")
     subparsers.add_parser("fetch-browser", help="Download the pinned Camoufox browser build")
 
-    status = subparsers.add_parser("status", help="Show watcher status")
+    status = subparsers.add_parser("status", help="Show account watcher status")
     status.add_argument("--json", action="store_true", help="Print machine-readable JSON")
     subparsers.add_parser("list", help="Alias for status")
     subparsers.add_parser("watchers", help="Alias for status")
 
-    watch = subparsers.add_parser("watch", help="Continuously show watcher status")
+    watch = subparsers.add_parser("watch", help="Continuously show account watcher status")
     watch.add_argument("--interval", type=int, default=10)
     watch.add_argument("--json", action="store_true")
 
-    check = subparsers.add_parser("check", help="Run one watcher check")
-    check.add_argument("watcher", nargs="?", help="Watcher id or name")
-    check.add_argument("--all", action="store_true", help="Check all enabled watchers")
+    check = subparsers.add_parser("check", help="Run one account check")
+    check.add_argument("account", nargs="?", help="Account watcher id, account id, or account name")
+    check.add_argument("--all", action="store_true", help="Check all enabled account watchers")
 
-    logs = subparsers.add_parser("logs", help="Show recent watcher events")
-    logs.add_argument("watcher", nargs="?", help="Optional watcher id or name")
+    logs = subparsers.add_parser("logs", help="Show recent account watcher events")
+    logs.add_argument("account", nargs="?", help="Optional account watcher id, account id, or name")
     logs.add_argument("--limit", type=int, default=30)
 
-    add = subparsers.add_parser("add", help="Add a watcher")
-    add.add_argument("name")
+    add = subparsers.add_parser("add", help="Add and select a remote session")
+    add.add_argument("name", help="Session title")
     add.add_argument("--account", required=True, help="Account id or name")
     add.add_argument("--remote-url", required=True)
-    _add_watcher_fields(add, include_required=False)
+    add.add_argument("--no-watch", action="store_true", help="Add the session without selecting it")
+    _add_watcher_fields(add)
 
-    edit = subparsers.add_parser("edit", help="Edit a watcher")
-    edit.add_argument("watcher")
-    edit.add_argument("--name")
-    edit.add_argument("--account")
-    edit.add_argument("--remote-url")
-    _add_watcher_fields(edit, include_required=False)
+    edit = subparsers.add_parser("edit", help="Edit an account watcher")
+    edit.add_argument("account", help="Account watcher id, account id, or account name")
+    _add_watcher_fields(edit)
 
-    enable = subparsers.add_parser("enable", help="Enable a watcher")
-    enable.add_argument("watcher")
-    disable = subparsers.add_parser("disable", help="Disable a watcher")
-    disable.add_argument("watcher")
+    enable = subparsers.add_parser("enable", help="Enable an account watcher")
+    enable.add_argument("account", help="Account watcher id, account id, or account name")
+    disable = subparsers.add_parser("disable", help="Disable an account watcher")
+    disable.add_argument("account", help="Account watcher id, account id, or account name")
+
+    sessions = subparsers.add_parser("sessions", help="List Claude sessions")
+    sessions.add_argument("account", nargs="?", help="Optional account id or name")
+    sessions.add_argument("--json", action="store_true")
+
+    discover = subparsers.add_parser("discover", help="Discover sessions for an account")
+    discover.add_argument("account", help="Account id or name")
+
+    session_add = subparsers.add_parser("session-add", help="Add a remote-control session")
+    session_add.add_argument("title")
+    session_add.add_argument("--account", required=True, help="Account id or name")
+    session_add.add_argument("--remote-url", required=True)
+    session_add.add_argument("--watch", action="store_true", help="Select the session immediately")
+
+    session_enable = subparsers.add_parser("session-enable", help="Select a session for watching")
+    session_enable.add_argument("session", help="Session id, key, or title")
+    session_disable = subparsers.add_parser("session-disable", help="Unselect a session")
+    session_disable.add_argument("session", help="Session id, key, or title")
 
     subparsers.add_parser("start", help="Start the local background service")
     subparsers.add_parser("stop", help="Stop the local background service")
@@ -118,14 +145,12 @@ def _build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _add_watcher_fields(parser: argparse.ArgumentParser, *, include_required: bool) -> None:
+def _add_watcher_fields(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--five-hour-threshold", type=float, default=None)
     parser.add_argument("--seven-day-threshold", type=float, default=None)
     parser.add_argument("--check-interval", type=int, default=None)
     parser.add_argument("--pause-message", default=None)
     parser.add_argument("--continue-message", default=None)
-    if include_required:
-        parser.add_argument("--enabled", action="store_true")
 
 
 def _serve(args, settings: Settings) -> int:
@@ -154,16 +179,24 @@ def _store(settings: Settings) -> Store:
 
 
 def _status_rows(settings: Settings) -> list[dict[str, object]]:
+    store = _store(settings)
     rows: list[dict[str, object]] = []
-    for watcher in _store(settings).list_watchers():
+    for watcher in store.list_account_watchers():
+        account = store.get_account(watcher.account_id)
+        sessions = store.list_sessions(watcher.account_id)
         ui = build_ui_watcher(watcher)
-        usage = _usage_source(watcher)
         rows.append(
             {
                 "id": watcher.id,
-                "name": watcher.name,
+                "account_id": account.id,
+                "account": account.name,
                 "state": watcher.state,
                 "enabled": watcher.enabled,
+                "sessions_total": len(sessions),
+                "sessions_watched": sum(1 for session in sessions if session.watch_enabled),
+                "sessions_controllable": sum(
+                    1 for session in sessions if session.control_supported
+                ),
                 "five_hour": ui.five_hour.utilization,
                 "seven_day": ui.seven_day.utilization,
                 "reset_5h": ui.five_hour.reset_display,
@@ -171,7 +204,7 @@ def _status_rows(settings: Settings) -> list[dict[str, object]]:
                 "last_check": ui.last_checked_display,
                 "reason": watcher.last_reason,
                 "error": watcher.last_error,
-                "usage_source": usage,
+                "usage_source": ui.usage_source,
             }
         )
     return rows
@@ -188,13 +221,14 @@ def _status(args, settings: Settings) -> int:
 
 def _print_status_table(rows: list[dict[str, object]]) -> None:
     if not rows:
-        print("No watchers configured.")
+        print("No account watchers configured.")
         return
     headers = [
         "ID",
-        "Name",
+        "Account",
         "State",
         "Enabled",
+        "Sessions",
         "5h",
         "7d",
         "Reset 5h",
@@ -205,9 +239,10 @@ def _print_status_table(rows: list[dict[str, object]]) -> None:
     table = [
         [
             row["id"],
-            row["name"],
+            row["account"],
             row["state"],
             "yes" if row["enabled"] else "no",
+            f"{row['sessions_watched']}/{row['sessions_total']}",
             _pct(row["five_hour"]),
             _pct(row["seven_day"]),
             row["reset_5h"] or "",
@@ -217,31 +252,13 @@ def _print_status_table(rows: list[dict[str, object]]) -> None:
         ]
         for row in rows
     ]
-    widths = [len(header) for header in headers]
-    for row in table:
-        for idx, value in enumerate(row):
-            widths[idx] = max(widths[idx], len(str(value)))
-    print("  ".join(header.ljust(widths[idx]) for idx, header in enumerate(headers)))
-    print("  ".join("-" * width for width in widths))
-    for row in table:
-        print("  ".join(str(value).ljust(widths[idx]) for idx, value in enumerate(row)))
+    _print_table(headers, table)
 
 
 def _pct(value: object) -> str:
     if value is None:
         return ""
     return f"{float(value):.1f}%"
-
-
-def _usage_source(watcher: Watcher) -> str | None:
-    if not watcher.last_usage_json:
-        return None
-    try:
-        data = json.loads(watcher.last_usage_json)
-    except json.JSONDecodeError:
-        return None
-    source = data.get("_csw_usage_source")
-    return str(source) if source else None
 
 
 def _watch(args, settings: Settings) -> int:
@@ -268,14 +285,15 @@ async def _check(args, settings: Settings) -> int:
     service = WatcherService(store, browser, settings)
     try:
         if args.all:
-            watchers = store.list_watchers(enabled_only=True)
+            watchers = store.list_account_watchers(enabled_only=True)
         else:
-            watchers = [_resolve_watcher(store, args.watcher)]
+            watchers = [_resolve_account_watcher(store, args.account)]
         for watcher in watchers:
             assert watcher.id is not None
-            result = await service.check_now(watcher.id)
-            store.add_event(watcher.id, "info", f"CLI check: {result}")
-            print(f"{watcher.name}: {result}")
+            account = store.get_account(watcher.account_id)
+            result = await service.check_account_now(watcher.id)
+            store.add_account_event(watcher.id, "info", f"CLI check: {result}")
+            print(f"{account.name}: {result}")
     finally:
         await browser.close()
     return 0
@@ -283,76 +301,239 @@ async def _check(args, settings: Settings) -> int:
 
 def _logs(args, settings: Settings) -> int:
     store = _store(settings)
-    watcher_id = None
-    if args.watcher:
-        watcher_id = _resolve_watcher(store, args.watcher).id
-    for event in store.list_events(watcher_id=watcher_id, limit=args.limit):
-        print(f"{event.created_at}  #{event.watcher_id}  {event.level:<7}  {event.message}")
+    account_watcher_id = None
+    if args.account:
+        account_watcher_id = _resolve_account_watcher(store, args.account).id
+    for event in store.list_account_events(account_watcher_id=account_watcher_id, limit=args.limit):
+        session = f"/{event.session_id}" if event.session_id else ""
+        print(
+            f"{event.created_at}  #{event.account_watcher_id}{session}  "
+            f"{event.level:<7}  {event.message}"
+        )
     return 0
 
 
 def _add(args, settings: Settings) -> int:
     store = _store(settings)
     account = _resolve_account(store, args.account)
-    watcher = Watcher(
-        id=None,
-        name=args.name,
-        account_id=account.id,
-        remote_url=args.remote_url,
-        five_hour_threshold=args.five_hour_threshold or 95.0,
-        seven_day_threshold=args.seven_day_threshold or 98.0,
-        check_interval_seconds=args.check_interval or 60,
-        pause_message=args.pause_message or Watcher.pause_message,
-        continue_message=args.continue_message or "continue",
+    if account.id is None:
+        raise SystemExit("Account has not been stored yet.")
+    watcher = store.ensure_account_watcher(account.id)
+    _apply_account_watcher_args(store, watcher, args)
+    session = store.upsert_session(
+        ClaudeSession(
+            id=None,
+            account_id=account.id,
+            session_key=store.session_key_from_url(args.remote_url),
+            title=args.name,
+            url=args.remote_url,
+            kind="remote",
+            status="unknown",
+            watch_enabled=not args.no_watch,
+            control_supported=True,
+            last_seen_at=utc_now(),
+        )
     )
-    created = store.create_watcher(watcher)
-    print(f"Created watcher #{created.id}: {created.name}")
+    print(
+        f"Added session #{session.id}: {session.title} "
+        f"({'selected' if session.watch_enabled else 'not selected'})"
+    )
     return 0
 
 
 def _edit(args, settings: Settings) -> int:
     store = _store(settings)
-    existing = _resolve_watcher(store, args.watcher)
-    account_id = existing.account_id
-    if args.account:
-        account_id = _resolve_account(store, args.account).id
-    updated = Watcher(
-        id=existing.id,
-        name=args.name or existing.name,
-        account_id=account_id,
-        remote_url=args.remote_url or existing.remote_url,
-        enabled=existing.enabled,
-        state=existing.state,
-        five_hour_threshold=args.five_hour_threshold or existing.five_hour_threshold,
-        seven_day_threshold=args.seven_day_threshold or existing.seven_day_threshold,
-        resume_threshold=existing.resume_threshold,
-        check_interval_seconds=args.check_interval or existing.check_interval_seconds,
-        pause_message=args.pause_message or existing.pause_message,
-        continue_message=args.continue_message or existing.continue_message,
-    )
-    saved = store.update_watcher_config(existing.id, updated)
-    print(f"Updated watcher #{saved.id}: {saved.name}")
+    watcher = _resolve_account_watcher(store, args.account)
+    saved = _apply_account_watcher_args(store, watcher, args)
+    account = store.get_account(saved.account_id)
+    print(f"Updated account watcher #{saved.id}: {account.name}")
     return 0
+
+
+def _apply_account_watcher_args(
+    store: Store,
+    watcher: AccountWatcher,
+    args: argparse.Namespace,
+) -> AccountWatcher:
+    updated = AccountWatcher(
+        id=watcher.id,
+        account_id=watcher.account_id,
+        enabled=watcher.enabled,
+        state=watcher.state,
+        five_hour_threshold=args.five_hour_threshold or watcher.five_hour_threshold,
+        seven_day_threshold=args.seven_day_threshold or watcher.seven_day_threshold,
+        resume_threshold=watcher.resume_threshold,
+        check_interval_seconds=args.check_interval or watcher.check_interval_seconds,
+        pause_message=args.pause_message or watcher.pause_message,
+        continue_message=args.continue_message or watcher.continue_message,
+        last_usage_json=watcher.last_usage_json,
+        last_reason=watcher.last_reason,
+        last_error=watcher.last_error,
+        last_checked_at=watcher.last_checked_at,
+    )
+    assert watcher.id is not None
+    return store.update_account_watcher_config(watcher.id, updated)
 
 
 def _set_enabled(args, settings: Settings, enabled: bool) -> int:
     store = _store(settings)
-    watcher = _resolve_watcher(store, args.watcher)
-    store.set_watcher_enabled(watcher.id, enabled)
-    print(f"{'Enabled' if enabled else 'Disabled'} watcher #{watcher.id}: {watcher.name}")
+    watcher = _resolve_account_watcher(store, args.account)
+    assert watcher.id is not None
+    store.set_account_watcher_enabled(watcher.id, enabled)
+    account = store.get_account(watcher.account_id)
+    print(f"{'Enabled' if enabled else 'Disabled'} account watcher #{watcher.id}: {account.name}")
     return 0
 
 
-def _resolve_watcher(store: Store, value: str | None) -> Watcher:
+def _sessions(args, settings: Settings) -> int:
+    store = _store(settings)
+    account_id = None
+    if args.account:
+        account_id = _resolve_account(store, args.account).id
+    sessions = store.list_sessions(account_id)
+    if args.json:
+        print(json.dumps([_session_row(store, session) for session in sessions], indent=2))
+        return 0
+    _print_sessions_table(store, sessions)
+    return 0
+
+
+async def _discover(args, settings: Settings) -> int:
+    store = _store(settings)
+    account = _resolve_account(store, args.account)
+    browser = CamoufoxManager(
+        headless=settings.camoufox_headless,
+        os_name=settings.camoufox_os,
+    )
+    discovery = SessionDiscoveryService(
+        store,
+        ClaudeSessionDiscoveryProvider(browser, keepalive=settings.browser_keepalive),
+    )
+    try:
+        result = await discovery.discover_account(account)
+    finally:
+        await browser.close()
+    print(f"{account.name}: discovered {result.found}, updated {result.updated}")
+    return 0
+
+
+def _session_add(args, settings: Settings) -> int:
+    store = _store(settings)
+    account = _resolve_account(store, args.account)
+    if account.id is None:
+        raise SystemExit("Account has not been stored yet.")
+    session = store.upsert_session(
+        ClaudeSession(
+            id=None,
+            account_id=account.id,
+            session_key=store.session_key_from_url(args.remote_url),
+            title=args.title,
+            url=args.remote_url,
+            kind="remote",
+            status="unknown",
+            watch_enabled=args.watch,
+            control_supported=True,
+            last_seen_at=utc_now(),
+        )
+    )
+    print(
+        f"Added session #{session.id}: {session.title} "
+        f"({'selected' if session.watch_enabled else 'not selected'})"
+    )
+    return 0
+
+
+def _set_session_enabled(args, settings: Settings, enabled: bool) -> int:
+    store = _store(settings)
+    session = _resolve_session(store, args.session)
+    assert session.id is not None
+    store.set_session_watch_enabled(session.id, enabled)
+    print(f"{'Selected' if enabled else 'Unselected'} session #{session.id}: {session.title}")
+    return 0
+
+
+def _session_row(store: Store, session: ClaudeSession) -> dict[str, object]:
+    account = store.get_account(session.account_id)
+    return {
+        "id": session.id,
+        "account": account.name,
+        "title": session.title,
+        "session_key": session.session_key,
+        "kind": session.kind,
+        "status": session.status,
+        "selected": session.watch_enabled,
+        "control_supported": session.control_supported,
+        "last_seen_at": session.last_seen_at,
+        "last_control_error": session.last_control_error,
+        "url": session.url,
+    }
+
+
+def _print_sessions_table(store: Store, sessions: list[ClaudeSession]) -> None:
+    if not sessions:
+        print("No sessions configured.")
+        return
+    headers = ["ID", "Account", "Selected", "Title", "Kind", "Status", "Control", "Last seen"]
+    table = []
+    for session in sessions:
+        row = _session_row(store, session)
+        table.append(
+            [
+                row["id"],
+                row["account"],
+                "yes" if row["selected"] else "no",
+                row["title"],
+                row["kind"],
+                row["status"],
+                "yes" if row["control_supported"] else "no",
+                row["last_seen_at"] or "",
+            ]
+        )
+    _print_table(headers, table)
+
+
+def _print_table(headers: list[str], table: list[list[object]]) -> None:
+    widths = [len(header) for header in headers]
+    for row in table:
+        for idx, value in enumerate(row):
+            widths[idx] = max(widths[idx], len(str(value)))
+    print("  ".join(header.ljust(widths[idx]) for idx, header in enumerate(headers)))
+    print("  ".join("-" * width for width in widths))
+    for row in table:
+        print("  ".join(str(value).ljust(widths[idx]) for idx, value in enumerate(row)))
+
+
+def _resolve_account_watcher(store: Store, value: str | None) -> AccountWatcher:
+    watchers = store.list_account_watchers()
     if not value:
-        watchers = store.list_watchers()
         if len(watchers) == 1:
             return watchers[0]
-        raise SystemExit("Specify a watcher id or name.")
-    for watcher in store.list_watchers():
-        if str(watcher.id) == value or watcher.name == value:
-            return watcher
-    raise SystemExit(f"Watcher not found: {value}")
+        raise SystemExit("Specify an account watcher id, account id, or account name.")
+
+    matches: dict[int, AccountWatcher] = {}
+    for watcher in watchers:
+        account = store.get_account(watcher.account_id)
+        if str(watcher.id) == value or str(account.id) == value or account.name == value:
+            assert watcher.id is not None
+            matches[watcher.id] = watcher
+    if not matches:
+        raise SystemExit(f"Account watcher not found: {value}")
+    if len(matches) > 1:
+        raise SystemExit(f"Account watcher reference is ambiguous: {value}")
+    return next(iter(matches.values()))
+
+
+def _resolve_session(store: Store, value: str) -> ClaudeSession:
+    matches = [
+        session
+        for session in store.list_sessions()
+        if str(session.id) == value or session.session_key == value or session.title == value
+    ]
+    if not matches:
+        raise SystemExit(f"Session not found: {value}")
+    if len(matches) > 1:
+        raise SystemExit(f"Session reference is ambiguous: {value}")
+    return matches[0]
 
 
 def _resolve_account(store: Store, value: str):

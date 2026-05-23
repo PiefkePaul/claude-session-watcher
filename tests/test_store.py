@@ -1,4 +1,4 @@
-from claude_session_watcher.models import Watcher
+from claude_session_watcher.models import ClaudeSession, Watcher
 from claude_session_watcher.store import Store
 
 
@@ -18,6 +18,11 @@ def test_store_creates_account_and_watcher(tmp_path):
     assert watcher.id is not None
     assert watcher.five_hour_threshold == 95.0
     assert store.list_watchers()[0].remote_url == "https://claude.ai/code/session"
+    account_watcher = store.get_account_watcher_by_account(account.id)
+    assert account_watcher is not None
+    sessions = store.list_sessions(account.id)
+    assert sessions[0].title == "main"
+    assert sessions[0].watch_enabled is True
 
 
 def test_store_runtime_updates_and_events(tmp_path):
@@ -69,3 +74,57 @@ def test_store_updates_watcher_configuration(tmp_path):
     assert saved.check_interval_seconds == 120
     assert saved.pause_message == "pause safely"
     assert saved.continue_message == "resume now"
+
+
+def test_store_session_selection_survives_discovery_upsert(tmp_path):
+    store = Store(tmp_path / "watcher.sqlite3")
+    account = store.create_account("work", str(tmp_path / "profile"))
+
+    selected = store.upsert_session(
+        ClaudeSession(
+            id=None,
+            account_id=account.id,
+            session_key="session_1",
+            title="main",
+            url="https://claude.ai/code/session_1",
+            kind="remote",
+            status="unknown",
+            watch_enabled=True,
+            control_supported=True,
+        )
+    )
+    rediscovered = store.upsert_session(
+        ClaudeSession(
+            id=None,
+            account_id=account.id,
+            session_key="session_1",
+            title="main renamed",
+            url="https://claude.ai/code/session_1",
+            kind="remote",
+            status="active",
+            watch_enabled=False,
+            control_supported=True,
+        )
+    )
+
+    assert selected.id == rediscovered.id
+    assert rediscovered.title == "main renamed"
+    assert rediscovered.watch_enabled is True
+
+
+def test_store_marks_missing_sessions_archived(tmp_path):
+    store = Store(tmp_path / "watcher.sqlite3")
+    account = store.create_account("work", str(tmp_path / "profile"))
+    store.upsert_session(
+        ClaudeSession(
+            id=None,
+            account_id=account.id,
+            session_key="session_1",
+            title="main",
+            url="https://claude.ai/code/session_1",
+        )
+    )
+
+    store.mark_missing_sessions(account.id, {"session_2"})
+
+    assert store.list_sessions(account.id)[0].status == "archived"

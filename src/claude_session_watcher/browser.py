@@ -159,6 +159,46 @@ class CamoufoxManager:
         detail = "; ".join(errors) if errors else "no usable organization ids found"
         raise BrowserError(f"Could not read Claude usage for this browser profile: {detail}")
 
+    async def discover_code_sessions(self, profile_dir: Path) -> list[dict[str, Any]]:
+        context = await self.context_for_profile(profile_dir)
+        page = await self._get_or_open_page(context, "https://claude.ai/code")
+        await page.goto("https://claude.ai/code", wait_until="domcontentloaded")
+        return await page.evaluate(
+            """
+            () => {
+              const seen = new Map();
+              const links = Array.from(document.querySelectorAll("a[href]"));
+              for (const link of links) {
+                const href = link.href || "";
+                if (!href.includes("/code/") || href.endsWith("/code")) continue;
+                const url = new URL(href, window.location.origin).toString();
+                const key = url.split("/").filter(Boolean).pop() || url;
+                const text = (link.innerText || link.textContent || "").trim();
+                const label = link.getAttribute("aria-label") || "";
+                const title = text || label || key;
+                const haystack = `${text} ${label} ${link.className || ""}`.toLowerCase();
+                const remoteHint = haystack.includes("remote")
+                  || haystack.includes("computer")
+                  || key.startsWith("session_");
+                const status = haystack.includes("archived")
+                  ? "archived"
+                  : haystack.includes("offline")
+                    ? "offline"
+                    : "unknown";
+                seen.set(key, {
+                  session_key: key,
+                  title,
+                  url,
+                  kind: remoteHint ? "remote" : "unknown",
+                  status,
+                  control_supported: remoteHint,
+                });
+              }
+              return Array.from(seen.values());
+            }
+            """,
+        )
+
     async def _browser_json(self, page, path: str):
         return await page.evaluate(
             """
