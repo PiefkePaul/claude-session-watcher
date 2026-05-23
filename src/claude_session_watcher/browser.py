@@ -31,6 +31,9 @@ class CamoufoxManager:
         for session in sessions:
             await self._close_session(session)
 
+    async def close_profile(self, profile_dir: Path) -> None:
+        await self._discard_profile(profile_dir)
+
     async def context_for_profile(
         self,
         profile_dir: Path,

@@ -11,6 +11,18 @@ class UsageError(Exception):
     pass
 
 
+class UsageAuthError(UsageError):
+    pass
+
+
+@dataclass(frozen=True, slots=True)
+class ClaudeCookie:
+    name: str
+    value: str
+    domain: str = "claude.ai"
+    path: str = "/"
+
+
 @dataclass(frozen=True, slots=True)
 class LimitSection:
     utilization: float
@@ -62,27 +74,51 @@ class UsageSnapshot:
 
 
 class ClaudeUsageClient:
-    def __init__(self, session_key: str, org_id: str | None = None):
-        if not session_key:
-            raise UsageError("Missing Claude sessionKey cookie")
-        self.session_key = session_key
+    def __init__(
+        self,
+        session_key: str | None = None,
+        *,
+        cookies: list[ClaudeCookie] | None = None,
+        org_id: str | None = None,
+    ):
+        if not session_key and not cookies:
+            raise UsageError("Missing Claude browser cookies")
+        self.cookies = cookies or [ClaudeCookie(name="sessionKey", value=str(session_key))]
         self.org_id = org_id
 
     async def _client(self) -> httpx.AsyncClient:
         headers = {
-            "accept": "application/json",
-            "referer": "https://claude.ai/",
-            "user-agent": "Mozilla/5.0",
+            "accept": "application/json, text/plain, */*",
+            "origin": "https://claude.ai",
+            "referer": "https://claude.ai/code",
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "same-origin",
+            "user-agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:139.0) "
+                "Gecko/20100101 Firefox/139.0"
+            ),
         }
-        cookies = {"sessionKey": self.session_key}
-        return httpx.AsyncClient(headers=headers, cookies=cookies, timeout=15)
+        client = httpx.AsyncClient(headers=headers, timeout=15, follow_redirects=False)
+        for cookie in self.cookies:
+            client.cookies.set(
+                cookie.name,
+                cookie.value,
+                domain=cookie.domain,
+                path=cookie.path or "/",
+            )
+        return client
+
+    @staticmethod
+    def _raise_for_response(response: httpx.Response) -> None:
+        if response.status_code in {401, 403}:
+            raise UsageAuthError(f"Claude usage request was rejected: HTTP {response.status_code}")
+        response.raise_for_status()
 
     async def _detect_org_id(self) -> str:
         async with await self._client() as client:
             response = await client.get("https://claude.ai/api/organizations")
-            if response.status_code == 401:
-                raise UsageError("Claude browser session is expired")
-            response.raise_for_status()
+            self._raise_for_response(response)
             data = response.json()
         if not isinstance(data, list) or not data:
             raise UsageError("Could not detect Claude organization")
@@ -91,17 +127,43 @@ class ClaudeUsageClient:
             raise UsageError("Claude organization response did not contain an id")
         return str(org_id)
 
-    async def fetch(self) -> UsageSnapshot:
-        org_id = self.org_id or await self._detect_org_id()
+    async def fetch_raw(self) -> dict[str, Any]:
+        if self.org_id:
+            orgs: list[dict[str, Any]] = [{"uuid": self.org_id}]
+        else:
+            async with await self._client() as client:
+                response = await client.get("https://claude.ai/api/organizations")
+                self._raise_for_response(response)
+                data = response.json()
+            if not isinstance(data, list) or not data:
+                raise UsageError("Could not detect Claude organization")
+            orgs = [org for org in data if isinstance(org, dict)]
+
         async with await self._client() as client:
-            response = await client.get(f"https://claude.ai/api/organizations/{org_id}/usage")
-            if response.status_code == 401:
-                raise UsageError("Claude browser session is expired")
-            response.raise_for_status()
-            data = response.json()
-        if not isinstance(data, dict):
-            raise UsageError("Usage API returned an unexpected payload")
-        return self._parse(data)
+            errors: list[str] = []
+            for org in orgs:
+                org_id = org.get("uuid") or org.get("id")
+                if not org_id:
+                    continue
+                response = await client.get(f"https://claude.ai/api/organizations/{org_id}/usage")
+                try:
+                    self._raise_for_response(response)
+                except UsageAuthError:
+                    raise
+                except httpx.HTTPStatusError as exc:
+                    errors.append(f"{org_id}: HTTP {exc.response.status_code}")
+                    continue
+                usage = response.json()
+                if isinstance(usage, dict) and ("five_hour" in usage or "seven_day" in usage):
+                    usage["_csw_org_id"] = str(org_id)
+                    usage["_csw_org_name"] = org.get("name")
+                    return usage
+                errors.append(f"{org_id}: usage payload missing expected keys")
+        detail = "; ".join(errors) if errors else "no usable organization ids found"
+        raise UsageError(f"Could not read Claude usage: {detail}")
+
+    async def fetch(self) -> UsageSnapshot:
+        return self._parse(await self.fetch_raw())
 
     @staticmethod
     def _parse_section(data: dict[str, Any], key: str) -> LimitSection | None:

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import json
 import re
+import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Form, HTTPException, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -24,6 +26,7 @@ def _slug(value: str) -> str:
 
 def create_app(settings: Settings | None = None) -> FastAPI:
     settings = settings or Settings()
+    settings.validate_web_security()
     settings.ensure_dirs()
     store = Store(settings.db_path)
     browser = CamoufoxManager(
@@ -46,6 +49,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app = FastAPI(title="Claude Session Watcher", lifespan=lifespan)
     templates = Jinja2Templates(directory=str(settings_path("templates")))
     app.mount("/static", StaticFiles(directory=str(settings_path("static"))), name="static")
+
+    @app.middleware("http")
+    async def require_ui_token(request: Request, call_next):
+        if not settings.ui_token or request.url.path == "/health":
+            return await call_next(request)
+        authorization = request.headers.get("authorization", "")
+        if _valid_auth_header(authorization, settings.ui_token):
+            return await call_next(request)
+        return Response(
+            status_code=401,
+            headers={"WWW-Authenticate": 'Basic realm="Claude Session Watcher"'},
+        )
 
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
@@ -179,6 +194,27 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def health():
         return {"ok": True}
 
+    @app.get("/api/status")
+    async def api_status():
+        return {
+            "accounts": len(store.list_accounts()),
+            "watchers": [_api_watcher(watcher) for watcher in store.list_watchers()],
+        }
+
+    @app.get("/api/watchers")
+    async def api_watchers():
+        return [_api_watcher(watcher) for watcher in store.list_watchers()]
+
+    @app.post("/api/watchers/{watcher_id}/check")
+    async def api_check_watcher(watcher_id: int):
+        try:
+            result = await service.check_now(watcher_id)
+            store.add_event(watcher_id, "info", f"API check: {result}")
+            return {"result": result, "watcher": _api_watcher(store.get_watcher(watcher_id))}
+        except Exception as exc:  # noqa: BLE001
+            store.add_event(watcher_id, "error", f"API check failed: {exc}")
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+
     return app
 
 
@@ -186,6 +222,48 @@ def settings_path(kind: str):
     from importlib.resources import files
 
     return files("claude_session_watcher").joinpath(kind)
+
+
+def _valid_auth_header(authorization: str, token: str) -> bool:
+    if authorization.startswith("Bearer "):
+        return secrets.compare_digest(authorization.removeprefix("Bearer ").strip(), token)
+    if authorization.startswith("Basic "):
+        import base64
+        import binascii
+
+        try:
+            decoded = base64.b64decode(authorization.removeprefix("Basic ").strip()).decode()
+        except (binascii.Error, UnicodeDecodeError):
+            return False
+        _username, _separator, password = decoded.partition(":")
+        return secrets.compare_digest(password, token)
+    return False
+
+
+def _api_watcher(watcher: Watcher) -> dict[str, object]:
+    ui = build_ui_watcher(watcher)
+    usage_source = None
+    if watcher.last_usage_json:
+        try:
+            usage_source = json.loads(watcher.last_usage_json).get("_csw_usage_source")
+        except json.JSONDecodeError:
+            usage_source = None
+    return {
+        "id": watcher.id,
+        "name": watcher.name,
+        "account_id": watcher.account_id,
+        "remote_url": watcher.remote_url,
+        "enabled": watcher.enabled,
+        "state": watcher.state,
+        "five_hour": ui.five_hour.utilization,
+        "seven_day": ui.seven_day.utilization,
+        "reset_5h": ui.five_hour.reset_display,
+        "reset_7d": ui.seven_day.reset_display,
+        "last_check": ui.last_checked_display,
+        "last_reason": watcher.last_reason,
+        "last_error": watcher.last_error,
+        "usage_source": usage_source,
+    }
 
 
 app = create_app()

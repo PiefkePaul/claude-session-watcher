@@ -3,20 +3,44 @@ from __future__ import annotations
 import asyncio
 import json
 import random
-from pathlib import Path
 
-from .browser import BrowserError, CamoufoxManager
+from .browser import CamoufoxManager
+from .controller import BrowserSessionController, SessionController
+from .engine import WatcherEngine
 from .models import Account, Watcher
+from .providers import (
+    CamoufoxBrowserUsageProvider,
+    CamoufoxCookiesHttpUsageProvider,
+    FallbackUsageProvider,
+    UsageProvider,
+)
 from .settings import Settings
 from .store import Store
-from .usage import ClaudeUsageClient
 
 
 class WatcherService:
-    def __init__(self, store: Store, browser: CamoufoxManager, settings: Settings):
+    def __init__(
+        self,
+        store: Store,
+        browser: CamoufoxManager,
+        settings: Settings,
+        *,
+        usage_provider: UsageProvider | None = None,
+        session_controller: SessionController | None = None,
+        engine: WatcherEngine | None = None,
+    ):
         self.store = store
         self.browser = browser
         self.settings = settings
+        self.usage_provider = usage_provider or FallbackUsageProvider(
+            CamoufoxCookiesHttpUsageProvider(),
+            CamoufoxBrowserUsageProvider(browser, keepalive=settings.browser_keepalive),
+        )
+        self.session_controller = session_controller or BrowserSessionController(
+            browser,
+            keepalive=settings.browser_keepalive,
+        )
+        self.engine = engine or WatcherEngine()
         self._task: asyncio.Task | None = None
         self._stop = asyncio.Event()
         self._next_due: dict[int, float] = {}
@@ -75,71 +99,24 @@ class WatcherService:
         if watcher.id is None:
             raise ValueError("Watcher must be stored before checking")
 
-        profile_dir = Path(account.profile_dir)
-        usage_data = await self.browser.fetch_usage(profile_dir)
-        usage = ClaudeUsageClient._parse(usage_data)
-        pause_reason = usage.is_pause_required(
-            watcher.five_hour_threshold,
-            watcher.seven_day_threshold,
-        )
+        result = await self.usage_provider.fetch(account)
+        decision = self.engine.decide(watcher, result.snapshot)
+        raw = dict(result.snapshot.raw)
+        raw["_csw_usage_source"] = result.source
+        raw_json = json.dumps(raw, separators=(",", ":"), sort_keys=True)
 
-        raw_json = json.dumps(usage.raw, separators=(",", ":"), sort_keys=True)
-        if pause_reason:
-            if watcher.state != "paused":
-                await self._send(watcher, account, watcher.pause_message)
-                self.store.update_watcher_runtime(
-                    watcher.id,
-                    state="paused",
-                    last_usage_json=raw_json,
-                    last_reason=pause_reason,
-                    last_error=None,
-                )
-                self.store.add_event(watcher.id, "warning", f"Pause sent: {pause_reason}")
-                return "paused"
-            self.store.update_watcher_runtime(
-                watcher.id,
-                state="paused",
-                last_usage_json=raw_json,
-                last_reason=pause_reason,
-                last_error=None,
-            )
-            return "waiting"
-
-        if watcher.state == "paused":
-            if usage.is_resume_ready(
-                watcher.five_hour_threshold,
-                watcher.seven_day_threshold,
-            ):
-                await self._send(watcher, account, watcher.continue_message)
-                self.store.update_watcher_runtime(
-                    watcher.id,
-                    state="active",
-                    last_usage_json=raw_json,
-                    last_reason="blocking limit cleared",
-                    last_error=None,
-                )
-                self.store.add_event(watcher.id, "info", "Continue sent")
-                return "continued"
-            self.store.update_watcher_runtime(
-                watcher.id,
-                state="paused",
-                last_usage_json=raw_json,
-                last_reason="waiting for blocking limit to drop below threshold",
-                last_error=None,
-            )
-            return "waiting"
-
+        if decision.message:
+            await self.session_controller.send(watcher, account, decision.message)
         self.store.update_watcher_runtime(
             watcher.id,
-            state="active",
+            state=decision.state,
             last_usage_json=raw_json,
-            last_reason="usage ok",
+            last_reason=decision.reason,
             last_error=None,
         )
-        return "ok"
+        if decision.event_level and decision.event_message:
+            self.store.add_event(watcher.id, decision.event_level, decision.event_message)
+        return decision.action
 
     async def _send(self, watcher: Watcher, account: Account, message: str) -> None:
-        try:
-            await self.browser.send_prompt(Path(account.profile_dir), watcher.remote_url, message)
-        except BrowserError:
-            raise
+        await self.session_controller.send(watcher, account, message)

@@ -27,7 +27,10 @@ class Settings(BaseSettings):
     port: int = 47831
     camoufox_headless: str | bool = Field(default_factory=default_headless)
     camoufox_os: str | None = None
+    browser_keepalive: bool = False
     check_jitter_seconds: int = 5
+    ui_token: str | None = None
+    local_port_bind_only: bool = False
 
     @field_validator("camoufox_headless", mode="before")
     @classmethod
@@ -54,7 +57,25 @@ class Settings(BaseSettings):
     def logs_dir(self) -> Path:
         return self.data_dir / "logs"
 
+    @property
+    def pid_path(self) -> Path:
+        return self.data_dir / "csw.pid"
+
     def ensure_dirs(self) -> None:
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.profiles_dir.mkdir(parents=True, exist_ok=True)
         self.logs_dir.mkdir(parents=True, exist_ok=True)
+
+    def validate_web_security(self) -> None:
+        if not self.is_public_bind():
+            return
+        if self.ui_token or self.local_port_bind_only:
+            return
+        raise ValueError(
+            "Refusing to bind the web UI to a non-local host without CSW_UI_TOKEN. "
+            "Set CSW_UI_TOKEN or bind to 127.0.0.1."
+        )
+
+    def is_public_bind(self) -> bool:
+        host = self.host.strip().lower()
+        return host not in {"127.0.0.1", "localhost", "::1"}

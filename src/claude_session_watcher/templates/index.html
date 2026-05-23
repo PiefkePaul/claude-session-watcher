@@ -111,6 +111,7 @@
                 <th>5h</th>
                 <th>7d</th>
                 <th>Reason</th>
+                <th>Source</th>
                 <th>Last check</th>
                 <th>Actions</th>
               </tr>
@@ -138,6 +139,7 @@
                   {% endif %}
                 </td>
                 <td>{{ watcher.watcher.last_reason or "" }}</td>
+                <td>{{ watcher.usage_source }}</td>
                 <td><span class="timestamp">{{ watcher.last_checked_display }}</span></td>
                 <td class="actions">
                   <a class="button secondary" href="/watchers/{{ watcher.watcher.id }}/edit">Edit</a>
@@ -150,7 +152,7 @@
                 </td>
               </tr>
               {% else %}
-              <tr><td colspan="8" class="empty">No watchers yet.</td></tr>
+              <tr><td colspan="9" class="empty">No watchers yet.</td></tr>
               {% endfor %}
             </tbody>
           </table>
