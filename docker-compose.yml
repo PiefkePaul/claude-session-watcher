@@ -1,7 +1,6 @@
 services:
   claude-session-watcher:
-    build: .
-    image: claude-session-watcher:local
+    image: piefkepaul/claude-session-watcher:beta
     restart: unless-stopped
     ports:
       - "127.0.0.1:47831:47831"

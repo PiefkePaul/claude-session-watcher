@@ -1,0 +1,4 @@
+services:
+  claude-session-watcher:
+    build: .
+    image: claude-session-watcher:local

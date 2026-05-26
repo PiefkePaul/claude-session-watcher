@@ -74,7 +74,8 @@ http://127.0.0.1:47831
 ## Docker
 
 ```bash
-docker compose up -d --build
+docker compose pull
+docker compose up -d
 ```
 
 Open:
@@ -85,6 +86,12 @@ http://localhost:47831
 
 The container stores browser profiles and SQLite state in the `csw-data` volume.
 The compose file binds the UI to `127.0.0.1:47831` on the host by default.
+
+For local image development:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+```
 
 ## Setup Flow
 
