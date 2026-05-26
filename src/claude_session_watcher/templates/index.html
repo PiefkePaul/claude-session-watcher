@@ -76,8 +76,9 @@
 
           <div class="limit-grid">
             <div>
-              <span class="label-text">State</span>
-              <span class="status {{ row.watcher.state }}">{{ row.watcher.state }}</span>
+              <span class="label-text">Status</span>
+              <span class="status {{ row.insights.status }}">{{ row.insights.status }}</span>
+              <span class="muted">{{ row.insights.reason }}</span>
             </div>
             <div>
               <span class="label-text">5h</span>
@@ -100,6 +101,22 @@
             <div>
               <span class="label-text">Last check</span>
               <span class="timestamp">{{ row.ui.last_checked_display }}</span>
+            </div>
+            <div>
+              <span class="label-text">Burn</span>
+              {% if row.insight_display.five_hour_burn %}
+              <span>5h {{ row.insight_display.five_hour_burn }}</span>
+              {% endif %}
+              {% if row.insight_display.seven_day_burn %}
+              <span class="muted">7d {{ row.insight_display.seven_day_burn }}</span>
+              {% endif %}
+              {% if not row.insight_display.five_hour_burn and not row.insight_display.seven_day_burn %}
+              <span class="muted">collecting history</span>
+              {% endif %}
+            </div>
+            <div>
+              <span class="label-text">Projected pause</span>
+              <span>{{ row.insight_display.next_pause or "" }}</span>
             </div>
             <div>
               <span class="label-text">Source</span>

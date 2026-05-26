@@ -105,6 +105,28 @@ def test_store_account_watcher_pause_metadata(tmp_path):
     assert active.paused_until is None
 
 
+def test_store_records_usage_samples(tmp_path):
+    store = Store(tmp_path / "watcher.sqlite3")
+    account = store.create_account("work", str(tmp_path / "profile"))
+    watcher = store.ensure_account_watcher(account.id)
+
+    sample = store.add_usage_sample(
+        watcher.id,
+        source="test",
+        five_hour_utilization=12.5,
+        seven_day_utilization=44.0,
+        five_hour_resets_at="2026-05-26T12:00:00+00:00",
+        seven_day_resets_at="2026-05-31T12:00:00+00:00",
+        raw_json='{"ok":true}',
+    )
+
+    samples = store.list_usage_samples(watcher.id)
+    assert samples[0].id == sample.id
+    assert samples[0].source == "test"
+    assert samples[0].five_hour_utilization == 12.5
+    assert samples[0].seven_day_resets_at == "2026-05-31T12:00:00+00:00"
+
+
 def test_store_session_selection_survives_discovery_upsert(tmp_path):
     store = Store(tmp_path / "watcher.sqlite3")
     account = store.create_account("work", str(tmp_path / "profile"))

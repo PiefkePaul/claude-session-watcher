@@ -333,6 +333,22 @@ th {
   background: #fffbeb;
 }
 
+.status.safe {
+  color: var(--ok);
+  background: #ecfdf3;
+}
+
+.status.near-limit,
+.status.weekly-blocked {
+  color: var(--warn);
+  background: #fffbeb;
+}
+
+.status.unknown {
+  color: var(--muted);
+  background: var(--surface-2);
+}
+
 .actions {
   display: flex;
   gap: 8px;

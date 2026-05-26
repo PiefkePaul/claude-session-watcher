@@ -104,3 +104,16 @@ class AccountWatcherEvent:
     level: str
     message: str
     created_at: str = ""
+
+
+@dataclass(slots=True)
+class UsageSample:
+    id: int | None
+    account_watcher_id: int
+    source: str
+    five_hour_utilization: float | None = None
+    seven_day_utilization: float | None = None
+    five_hour_resets_at: str | None = None
+    seven_day_resets_at: str | None = None
+    raw_json: str | None = None
+    created_at: str = ""

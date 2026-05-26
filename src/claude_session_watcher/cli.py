@@ -11,7 +11,8 @@ from pathlib import Path
 
 from .browser import CamoufoxManager
 from .discovery import ClaudeSessionDiscoveryProvider, SessionDiscoveryService
-from .formatting import build_ui_watcher
+from .formatting import build_ui_watcher, format_timestamp
+from .insights import build_usage_insights
 from .models import AccountWatcher, ClaudeSession, utc_now
 from .notifications import NotificationEvent, notifier_from_settings
 from .pause_templates import CUSTOM_TEMPLATE, PAUSE_TEMPLATES
@@ -44,6 +45,8 @@ def main(argv: list[str] | None = None) -> int:
         return asyncio.run(_check(args, settings))
     if args.command == "logs":
         return _logs(args, settings)
+    if args.command == "history":
+        return _history(args, settings)
     if args.command == "add":
         return _add(args, settings)
     if args.command == "edit":
@@ -108,6 +111,15 @@ def _build_parser() -> argparse.ArgumentParser:
     logs = subparsers.add_parser("logs", help="Show recent account watcher events")
     logs.add_argument("account", nargs="?", help="Optional account watcher id, account id, or name")
     logs.add_argument("--limit", type=int, default=30)
+
+    history = subparsers.add_parser("history", help="Show recent usage history")
+    history.add_argument(
+        "account",
+        nargs="?",
+        help="Optional account watcher id, account id, or name",
+    )
+    history.add_argument("--limit", type=int, default=20)
+    history.add_argument("--json", action="store_true")
 
     add = subparsers.add_parser("add", help="Add and select a remote session")
     add.add_argument("name", help="Session title")
@@ -197,13 +209,17 @@ def _status_rows(settings: Settings) -> list[dict[str, object]]:
     for watcher in store.list_account_watchers():
         account = store.get_account(watcher.account_id)
         sessions = store.list_sessions(watcher.account_id)
+        samples = store.list_usage_samples(watcher.id)
         ui = build_ui_watcher(watcher)
+        insights = build_usage_insights(watcher, samples)
         rows.append(
             {
                 "id": watcher.id,
                 "account_id": account.id,
                 "account": account.name,
                 "state": watcher.state,
+                "status": insights.status,
+                "status_reason": insights.reason,
                 "enabled": watcher.enabled,
                 "sessions_total": len(sessions),
                 "sessions_watched": sum(1 for session in sessions if session.watch_enabled),
@@ -220,6 +236,11 @@ def _status_rows(settings: Settings) -> list[dict[str, object]]:
                 "usage_source": ui.usage_source,
                 "pause_template": watcher.pause_template,
                 "paused_until": watcher.paused_until,
+                "sample_count": insights.sample_count,
+                "five_hour_burn_per_hour": insights.five_hour_burn_per_hour,
+                "seven_day_burn_per_hour": insights.seven_day_burn_per_hour,
+                "next_pause_at": insights.next_pause_at,
+                "next_pause": format_timestamp(insights.next_pause_at),
             }
         )
     return rows
@@ -241,11 +262,13 @@ def _print_status_table(rows: list[dict[str, object]]) -> None:
     headers = [
         "ID",
         "Account",
-        "State",
+        "Status",
         "Enabled",
         "Sessions",
         "5h",
         "7d",
+        "Burn 5h",
+        "Pause ETA",
         "Reset 5h",
         "Reset 7d",
         "Last check",
@@ -255,11 +278,13 @@ def _print_status_table(rows: list[dict[str, object]]) -> None:
         [
             row["id"],
             row["account"],
-            row["state"],
+            row["status"],
             "yes" if row["enabled"] else "no",
             f"{row['sessions_watched']}/{row['sessions_total']}",
             _pct(row["five_hour"]),
             _pct(row["seven_day"]),
+            _burn(row["five_hour_burn_per_hour"]),
+            row["next_pause"] or "",
             row["reset_5h"] or "",
             row["reset_7d"] or "",
             row["last_check"] or "",
@@ -274,6 +299,12 @@ def _pct(value: object) -> str:
     if value is None:
         return ""
     return f"{float(value):.1f}%"
+
+
+def _burn(value: object) -> str:
+    if value is None:
+        return ""
+    return f"{float(value):.1f}%/h"
 
 
 def _watch(args, settings: Settings) -> int:
@@ -326,6 +357,43 @@ def _logs(args, settings: Settings) -> int:
             f"{event.level:<7}  {event.message}"
         )
     return 0
+
+
+def _history(args, settings: Settings) -> int:
+    store = _store(settings)
+    watcher = _resolve_account_watcher(store, args.account)
+    assert watcher.id is not None
+    samples = store.list_usage_samples(watcher.id, limit=args.limit)
+    if args.json:
+        print(json.dumps([_usage_sample_row(sample) for sample in samples], indent=2))
+        return 0
+    headers = ["Time", "Source", "5h", "7d", "Reset 5h", "Reset 7d"]
+    table = [
+        [
+            format_timestamp(sample.created_at),
+            sample.source,
+            _pct(sample.five_hour_utilization),
+            _pct(sample.seven_day_utilization),
+            format_timestamp(sample.five_hour_resets_at),
+            format_timestamp(sample.seven_day_resets_at),
+        ]
+        for sample in samples
+    ]
+    _print_table(headers, table)
+    return 0
+
+
+def _usage_sample_row(sample) -> dict[str, object]:
+    return {
+        "id": sample.id,
+        "account_watcher_id": sample.account_watcher_id,
+        "source": sample.source,
+        "five_hour_utilization": sample.five_hour_utilization,
+        "seven_day_utilization": sample.seven_day_utilization,
+        "five_hour_resets_at": sample.five_hour_resets_at,
+        "seven_day_resets_at": sample.seven_day_resets_at,
+        "created_at": sample.created_at,
+    }
 
 
 def _add(args, settings: Settings) -> int:

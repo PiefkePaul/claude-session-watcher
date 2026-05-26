@@ -123,6 +123,23 @@ class WatcherService:
         raw = dict(result.snapshot.raw)
         raw["_csw_usage_source"] = result.source
         raw_json = json.dumps(raw, separators=(",", ":"), sort_keys=True)
+        self.store.add_usage_sample(
+            watcher.id,
+            source=result.source,
+            five_hour_utilization=(
+                result.snapshot.five_hour.utilization if result.snapshot.five_hour else None
+            ),
+            seven_day_utilization=(
+                result.snapshot.seven_day.utilization if result.snapshot.seven_day else None
+            ),
+            five_hour_resets_at=(
+                result.snapshot.five_hour.resets_at if result.snapshot.five_hour else None
+            ),
+            seven_day_resets_at=(
+                result.snapshot.seven_day.resets_at if result.snapshot.seven_day else None
+            ),
+            raw_json=raw_json,
+        )
 
         if decision.message:
             await self._send_to_watched_sessions(watcher, account, decision.message)

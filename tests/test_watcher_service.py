@@ -75,3 +75,6 @@ async def test_service_sends_only_to_selected_sessions(tmp_path):
     assert controller.sent == [("session_selected", account_watcher.pause_message)]
     assert store.get_session(selected.id).last_control_error is None
     assert store.get_session(unselected.id).last_control_error is None
+    samples = store.list_usage_samples(account_watcher.id)
+    assert samples[0].source == "test"
+    assert samples[0].five_hour_utilization == 99.0

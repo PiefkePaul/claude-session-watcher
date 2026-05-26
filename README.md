@@ -18,6 +18,7 @@ Early MVP. The core pieces are present:
 - best-effort session discovery from the Claude Code dashboard
 - reset-aware resume with a configurable safety margin
 - pause templates for minimal, worklog, and handoff-style checkpoints
+- usage history with burn-rate and pause-threshold projections
 - optional ntfy notifications
 - pause/continue state machine
 - Docker image and compose file
@@ -98,6 +99,12 @@ The watcher uses the authenticated Camoufox browser profile for usage checks. It
 After login you can close the visible Camoufox window. Later checks read cookies directly and only reopen Camoufox when a browser fallback or Remote Control prompt send is needed.
 Account watchers can be edited from the dashboard to change thresholds, check interval, enabled state, and pause/continue messages. Sessions are selected independently; unselected sessions are displayed but never receive pause/continue commands.
 
+Every successful usage check is stored as an account-scoped history sample. The UI and CLI use those samples to estimate burn rate and the projected time when a pause threshold will be reached. Projections are only calculated within the same reset window, so a 5-hour or weekly reset is not treated as negative usage.
+
+## Data Sources
+
+The primary usage source is the authenticated Claude browser profile. Statusline ingest is intentionally not part of the core workflow because this service usually does not run inside the Claude Code terminal. A future optional host bridge may add local Claude Code statusline telemetry, but the default product remains browser/profile based.
+
 ## CLI
 
 ```bash
@@ -106,6 +113,8 @@ csw status --json
 csw watch
 csw check --all
 csw logs
+csw history PC
+csw history PC --json
 csw sessions PC
 csw discover PC
 csw add main --account PC --remote-url https://claude.ai/code/...

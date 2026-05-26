@@ -11,6 +11,7 @@ from .models import (
     AccountWatcher,
     AccountWatcherEvent,
     ClaudeSession,
+    UsageSample,
     Watcher,
     WatcherEvent,
     utc_now,
@@ -128,6 +129,22 @@ class Store:
                     message TEXT NOT NULL,
                     created_at TEXT NOT NULL
                 );
+
+                CREATE TABLE IF NOT EXISTS usage_samples (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_watcher_id INTEGER NOT NULL
+                        REFERENCES account_watchers(id) ON DELETE CASCADE,
+                    source TEXT NOT NULL,
+                    five_hour_utilization REAL,
+                    seven_day_utilization REAL,
+                    five_hour_resets_at TEXT,
+                    seven_day_resets_at TEXT,
+                    raw_json TEXT,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_usage_samples_account_created
+                    ON usage_samples(account_watcher_id, created_at);
                 """
             )
             self._ensure_columns(
@@ -262,6 +279,20 @@ class Store:
             session_id=row["session_id"],
             level=row["level"],
             message=row["message"],
+            created_at=row["created_at"],
+        )
+
+    @staticmethod
+    def _usage_sample_from_row(row: sqlite3.Row) -> UsageSample:
+        return UsageSample(
+            id=row["id"],
+            account_watcher_id=row["account_watcher_id"],
+            source=row["source"],
+            five_hour_utilization=row["five_hour_utilization"],
+            seven_day_utilization=row["seven_day_utilization"],
+            five_hour_resets_at=row["five_hour_resets_at"],
+            seven_day_resets_at=row["seven_day_resets_at"],
+            raw_json=row["raw_json"],
             created_at=row["created_at"],
         )
 
@@ -680,6 +711,70 @@ class Store:
         with self._connect() as conn:
             rows = conn.execute(sql, tuple(params)).fetchall()
             return [self._account_event_from_row(row) for row in rows]
+
+    def add_usage_sample(
+        self,
+        account_watcher_id: int,
+        *,
+        source: str,
+        five_hour_utilization: float | None,
+        seven_day_utilization: float | None,
+        five_hour_resets_at: str | None,
+        seven_day_resets_at: str | None,
+        raw_json: str | None,
+    ) -> UsageSample:
+        with self._connect() as conn:
+            cur = conn.execute(
+                """
+                INSERT INTO usage_samples (
+                    account_watcher_id, source,
+                    five_hour_utilization, seven_day_utilization,
+                    five_hour_resets_at, seven_day_resets_at,
+                    raw_json, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    account_watcher_id,
+                    source,
+                    five_hour_utilization,
+                    seven_day_utilization,
+                    five_hour_resets_at,
+                    seven_day_resets_at,
+                    raw_json,
+                    utc_now(),
+                ),
+            )
+            sample_id = cur.lastrowid
+        return self.get_usage_sample(sample_id)
+
+    def get_usage_sample(self, sample_id: int) -> UsageSample:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT * FROM usage_samples WHERE id = ?",
+                (sample_id,),
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"Usage sample {sample_id} not found")
+            return self._usage_sample_from_row(row)
+
+    def list_usage_samples(
+        self,
+        account_watcher_id: int,
+        *,
+        limit: int = 200,
+    ) -> list[UsageSample]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM usage_samples
+                WHERE account_watcher_id = ?
+                ORDER BY id DESC
+                LIMIT ?
+                """,
+                (account_watcher_id, limit),
+            ).fetchall()
+            return [self._usage_sample_from_row(row) for row in rows]
 
     def mark_missing_sessions(self, account_id: int, seen_keys: set[str]) -> None:
         sessions = self.list_sessions(account_id)

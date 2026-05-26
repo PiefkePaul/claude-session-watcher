@@ -13,7 +13,8 @@ from fastapi.templating import Jinja2Templates
 
 from .browser import CamoufoxManager
 from .discovery import ClaudeSessionDiscoveryProvider, SessionDiscoveryService
-from .formatting import build_ui_watcher
+from .formatting import build_ui_watcher, format_timestamp
+from .insights import UsageInsights, build_usage_insights
 from .models import Account, AccountWatcher, ClaudeSession, Watcher, utc_now
 from .pause_templates import pause_template_options
 from .settings import Settings
@@ -325,6 +326,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def api_account_sessions(account_id: int):
         return [_api_session(session) for session in store.list_sessions(account_id)]
 
+    @app.get("/api/account-watchers/{account_watcher_id}/usage-history")
+    async def api_usage_history(account_watcher_id: int, limit: int = 200):
+        return [
+            _api_usage_sample(sample)
+            for sample in store.list_usage_samples(account_watcher_id, limit=limit)
+        ]
+
     @app.post("/api/accounts/{account_id}/discover")
     async def api_discover_account(account_id: int):
         result = await discovery.discover_account(store.get_account(account_id))
@@ -406,10 +414,14 @@ def _account_row(store: Store, account: Account) -> dict[str, object]:
         raise ValueError("Account must be stored before rendering")
     account_watcher = store.ensure_account_watcher(account.id)
     sessions = store.list_sessions(account.id)
+    samples = store.list_usage_samples(account_watcher.id)
+    insights = build_usage_insights(account_watcher, samples)
     return {
         "account": account,
         "watcher": account_watcher,
         "ui": build_ui_watcher(account_watcher),
+        "insights": insights,
+        "insight_display": _insight_display(insights),
         "sessions": sessions,
         "session_count": len(sessions),
         "watched_count": sum(1 for session in sessions if session.watch_enabled),
@@ -436,6 +448,8 @@ def _api_account_watcher(store: Store, watcher: AccountWatcher) -> dict[str, obj
     ui = build_ui_watcher(watcher)
     account = store.get_account(watcher.account_id)
     sessions = store.list_sessions(watcher.account_id)
+    samples = store.list_usage_samples(watcher.id)
+    insights = build_usage_insights(watcher, samples)
     return {
         "id": watcher.id,
         "account_id": watcher.account_id,
@@ -443,13 +457,13 @@ def _api_account_watcher(store: Store, watcher: AccountWatcher) -> dict[str, obj
         "enabled": watcher.enabled,
         "state": watcher.state,
         "five_hour_threshold": watcher.five_hour_threshold,
-            "seven_day_threshold": watcher.seven_day_threshold,
-            "check_interval_seconds": watcher.check_interval_seconds,
-            "pause_template": watcher.pause_template,
-            "paused_at": watcher.paused_at,
-            "paused_limit": watcher.paused_limit,
-            "paused_until": watcher.paused_until,
-            "five_hour": ui.five_hour.utilization,
+        "seven_day_threshold": watcher.seven_day_threshold,
+        "check_interval_seconds": watcher.check_interval_seconds,
+        "pause_template": watcher.pause_template,
+        "paused_at": watcher.paused_at,
+        "paused_limit": watcher.paused_limit,
+        "paused_until": watcher.paused_until,
+        "five_hour": ui.five_hour.utilization,
         "seven_day": ui.seven_day.utilization,
         "reset_5h": ui.five_hour.reset_display,
         "reset_7d": ui.seven_day.reset_display,
@@ -460,6 +474,7 @@ def _api_account_watcher(store: Store, watcher: AccountWatcher) -> dict[str, obj
         "session_count": len(sessions),
         "watched_session_count": sum(1 for session in sessions if session.watch_enabled),
         "controllable_session_count": sum(1 for session in sessions if session.control_supported),
+        "insights": _api_usage_insights(insights),
     }
 
 
@@ -478,6 +493,46 @@ def _api_session(session: ClaudeSession) -> dict[str, object]:
         "last_checked_at": session.last_checked_at,
         "last_control_error": session.last_control_error,
     }
+
+
+def _api_usage_sample(sample) -> dict[str, object]:
+    return {
+        "id": sample.id,
+        "account_watcher_id": sample.account_watcher_id,
+        "source": sample.source,
+        "five_hour_utilization": sample.five_hour_utilization,
+        "seven_day_utilization": sample.seven_day_utilization,
+        "five_hour_resets_at": sample.five_hour_resets_at,
+        "seven_day_resets_at": sample.seven_day_resets_at,
+        "created_at": sample.created_at,
+    }
+
+
+def _api_usage_insights(insights: UsageInsights) -> dict[str, object]:
+    return {
+        "status": insights.status,
+        "reason": insights.reason,
+        "sample_count": insights.sample_count,
+        "five_hour_burn_per_hour": insights.five_hour_burn_per_hour,
+        "seven_day_burn_per_hour": insights.seven_day_burn_per_hour,
+        "five_hour_pause_at": insights.five_hour_pause_at,
+        "seven_day_pause_at": insights.seven_day_pause_at,
+        "next_pause_at": insights.next_pause_at,
+    }
+
+
+def _insight_display(insights: UsageInsights) -> dict[str, str]:
+    return {
+        "five_hour_burn": _format_burn(insights.five_hour_burn_per_hour),
+        "seven_day_burn": _format_burn(insights.seven_day_burn_per_hour),
+        "next_pause": format_timestamp(insights.next_pause_at),
+    }
+
+
+def _format_burn(value: float | None) -> str:
+    if value is None:
+        return ""
+    return f"{value:.1f}%/h"
 
 
 def _usage_source(raw_json: str | None) -> str | None:
