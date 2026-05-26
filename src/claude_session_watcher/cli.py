@@ -709,11 +709,17 @@ def _doctor(args, settings: Settings) -> int:
     except Exception as exc:  # noqa: BLE001
         checks.append(("db readable", False, str(exc)))
     try:
-        import camoufox  # noqa: F401
+        from camoufox.async_api import AsyncCamoufox  # noqa: F401
 
-        checks.append(("camoufox import", True, "available"))
-    except ImportError as exc:
-        checks.append(("camoufox import", False, str(exc)))
+        checks.append(("camoufox import", True, "available (async_api)"))
+    except ImportError:
+        checks.append(
+            (
+                "camoufox import",
+                False,
+                "missing camoufox.async_api (install: pip install -U camoufox[geoip])",
+            )
+        )
     for name, ok, detail in checks:
         print(f"{'ok' if ok else 'fail'}  {name}: {detail}")
     return 0 if all(ok for _, ok, _ in checks) else 1

@@ -115,7 +115,11 @@ class CamoufoxManager:
             try:
                 from camoufox.async_api import AsyncCamoufox
             except ImportError as exc:
-                raise BrowserError("camoufox is not installed") from exc
+                raise BrowserError(
+                    "Camoufox is not installed (missing camoufox.async_api). "
+                    "Install: python -m pip install -U camoufox[geoip] "
+                    "and then run: python -m camoufox fetch"
+                ) from exc
 
             if desired_headless is False and self.display_manager:
                 await self.display_manager.ensure_started()
