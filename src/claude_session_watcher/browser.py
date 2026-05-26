@@ -364,10 +364,17 @@ class CamoufoxManager:
                   const regexes = patterns.map((p) => {
                     try { return new RegExp(p, "i"); } catch (e) { return null; }
                   }).filter(Boolean);
-                  const menus = Array.from(document.querySelectorAll("div[role='menu'], div[data-radix-menu-content]"))
-                    .filter((el) => el && el.offsetParent !== null);
+                  const menus = Array.from(
+                    document.querySelectorAll(
+                      "div[role='menu'], div[data-radix-menu-content]",
+                    ),
+                  ).filter((el) => el && el.offsetParent !== null);
                   const scope = menus.length ? menus[menus.length - 1] : document.body;
-                  const candidates = Array.from(scope.querySelectorAll("button,[role='menuitemradio'],[role='menuitem'],a,[data-state]"));
+                  const candidates = Array.from(
+                    scope.querySelectorAll(
+                      "button,[role='menuitemradio'],[role='menuitem'],a,[data-state]",
+                    ),
+                  );
                   function textOf(el) {
                     return (el.innerText || el.textContent || "").trim();
                   }
@@ -377,15 +384,25 @@ class CamoufoxManager:
                     return regexes.some((re) => re.test(t));
                   }
                   // Prefer an unchecked radio item that mentions Pro.
-                  const unchecked = candidates.find((el) => el.getAttribute("data-state") === "unchecked" && isPro(el));
-                  const any = candidates.find((el) => isPro(el) && el.getAttribute("data-state") !== "checked");
+                  const unchecked = candidates.find(
+                    (el) => el.getAttribute("data-state") === "unchecked" && isPro(el),
+                  );
+                  const any = candidates.find(
+                    (el) => isPro(el) && el.getAttribute("data-state") !== "checked",
+                  );
                   const target = unchecked || any;
                   if (!target) {
                     return { clicked: false };
                   }
-                  const clickable = target.closest("button,[role='menuitemradio'],[role='menuitem'],a") || target;
+                  const clickable =
+                    target.closest("button,[role='menuitemradio'],[role='menuitem'],a")
+                      || target;
                   clickable.click();
-                  return { clicked: true, text: textOf(target), dataState: target.getAttribute("data-state") };
+                  return {
+                    clicked: true,
+                    text: textOf(target),
+                    dataState: target.getAttribute("data-state"),
+                  };
                 }
                 """,
                 {"patterns": js_patterns},

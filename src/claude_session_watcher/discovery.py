@@ -6,7 +6,10 @@ from pathlib import Path
 
 from .browser import CamoufoxManager
 from .models import Account, ClaudeSession, utc_now
+from .profile_cookies import load_claude_cookies
+from .session_list import ClaudeWebSessionsClient
 from .store import Store
+from .usage import UsageLoginRequiredError
 
 
 @dataclass(frozen=True, slots=True)
@@ -25,17 +28,43 @@ class ClaudeSessionDiscoveryProvider:
         if account.id is None:
             raise ValueError("Account must be stored before session discovery")
         profile_dir = Path(account.profile_dir)
+        raw_sessions: list[dict[str, object]]
         try:
-            raw_sessions = await self.browser.discover_code_sessions(profile_dir)
-        finally:
-            if not self.keepalive:
-                await self.browser.close_profile(profile_dir)
+            # Prefer the lightweight web API endpoint used by the Claude Code UI.
+            cookies = load_claude_cookies(profile_dir)
+            client = ClaudeWebSessionsClient(cookies=cookies)
+            raw_sessions = await client.list_all()
+        except UsageLoginRequiredError:
+            # No cookies/session means there's nothing to discover yet.
+            raise
+        except Exception as primary_exc:  # noqa: BLE001
+            # Fallback to browser-driven discovery for resilience when the web endpoint
+            # changes or a corporate proxy blocks it.
+            try:
+                raw_sessions = await self.browser.discover_code_sessions(profile_dir)
+            except Exception as fallback_exc:  # noqa: BLE001
+                # Surface the primary failure first (it is usually clearer: auth/403).
+                raise primary_exc from fallback_exc
+            finally:
+                if not self.keepalive:
+                    await self.browser.close_profile(profile_dir)
+        # Cookie-based discovery does not require opening/closing the browser.
         sessions: list[ClaudeSession] = []
         for raw in raw_sessions:
-            session_key = str(raw.get("session_key") or "")
+            # Two discovery backends exist:
+            # - cookie/http: returns v1 session objects where "id" is the session id
+            # - browser/dom: returns our internal dict with "session_key" + "url"
+            session_key = str(raw.get("id") or raw.get("session_key") or "")
             url = str(raw.get("url") or "")
+            if not url and session_key:
+                url = f"https://claude.ai/code/{session_key}"
             if not session_key or not url:
                 continue
+            tags = raw.get("tags")
+            is_remote = isinstance(tags, list) and any(
+                str(tag) == "remote-control-repl" for tag in tags
+            )
+            status = raw.get("session_status") or raw.get("status") or "unknown"
             sessions.append(
                 ClaudeSession(
                     id=None,
@@ -43,10 +72,10 @@ class ClaudeSessionDiscoveryProvider:
                     session_key=session_key,
                     title=str(raw.get("title") or session_key),
                     url=url,
-                    kind=str(raw.get("kind") or "unknown"),
-                    status=str(raw.get("status") or "unknown"),
+                    kind=str(raw.get("kind") or ("remote" if is_remote else "cloud")),
+                    status=str(status or "unknown"),
                     watch_enabled=False,
-                    control_supported=bool(raw.get("control_supported")),
+                    control_supported=bool(raw.get("control_supported", is_remote)),
                     raw_json=json.dumps(raw, separators=(",", ":"), sort_keys=True),
                     last_seen_at=utc_now(),
                 )
