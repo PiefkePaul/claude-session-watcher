@@ -35,11 +35,16 @@ class ClaudeWebSessionsClient:
         if not cookies:
             raise SessionListError("Missing claude.ai cookies")
         self.cookies = cookies
+        self._cookie_map = {
+            cookie.name: cookie.value
+            for cookie in cookies
+            if cookie.name and cookie.value
+        }
 
     def _headers(self) -> dict[str, str]:
         # Mirrors what the web UI uses for Claude Code session management.
         # (See: community script that calls /v1/sessions from the browser console.)
-        return {
+        headers = {
             "accept": "*/*",
             "origin": "https://claude.ai",
             "referer": "https://claude.ai/code",
@@ -54,6 +59,17 @@ class ClaudeWebSessionsClient:
                 "Gecko/20100101 Firefox/139.0"
             ),
         }
+        # When multiple orgs exist, claude.ai sometimes relies on these hints.
+        last_active_org = self._cookie_map.get("lastActiveOrg")
+        if last_active_org:
+            headers["x-organization-uuid"] = last_active_org
+        activity_session = self._cookie_map.get("activitySessionId")
+        if activity_session:
+            headers["x-activity-session-id"] = activity_session
+        device_id = self._cookie_map.get("anthropic-device-id")
+        if device_id:
+            headers["anthropic-device-id"] = device_id
+        return headers
 
     def _client(self) -> httpx.AsyncClient:
         client = httpx.AsyncClient(
@@ -110,4 +126,3 @@ class ClaudeWebSessionsClient:
                 break
             after_id = page.last_id
         return sessions
-
