@@ -282,41 +282,103 @@ class CamoufoxManager:
         context = await self.context_for_profile(profile_dir)
         page = await self._get_or_open_page(context, "https://claude.ai/code")
         await page.goto("https://claude.ai/code", wait_until="domcontentloaded")
-        return await page.evaluate(
-            """
-            () => {
-              const seen = new Map();
-              const links = Array.from(document.querySelectorAll("a[href]"));
-              for (const link of links) {
-                const href = link.href || "";
-                if (!href.includes("/code/") || href.endsWith("/code")) continue;
-                const url = new URL(href, window.location.origin).toString();
-                const key = url.split("/").filter(Boolean).pop() || url;
-                const text = (link.innerText || link.textContent || "").trim();
-                const label = link.getAttribute("aria-label") || "";
-                const title = text || label || key;
-                const haystack = `${text} ${label} ${link.className || ""}`.toLowerCase();
-                const remoteHint = haystack.includes("remote")
-                  || haystack.includes("computer")
-                  || key.startsWith("session_");
-                const status = haystack.includes("archived")
-                  ? "archived"
-                  : haystack.includes("offline")
-                    ? "offline"
-                    : "unknown";
-                seen.set(key, {
-                  session_key: key,
-                  title,
-                  url,
-                  kind: remoteHint ? "remote" : "unknown",
-                  status,
-                  control_supported: remoteHint,
-                });
-              }
-              return Array.from(seen.values());
-            }
-            """,
-        )
+
+        # The session list is rendered client-side; give the app a brief moment to populate
+        # "Recents" before scraping. We avoid relying on brittle CSS selectors and instead
+        # look for session-like links/ids in the DOM and Next.js boot payload.
+        for _ in range(60):
+            sessions = await page.evaluate(
+                """
+                () => {
+                  const seen = new Map();
+
+                  function pushCandidate(url, titleHint, extraText) {
+                    if (!url) return;
+                    let parsed;
+                    try {
+                      parsed = new URL(url, window.location.origin);
+                    } catch (e) {
+                      return;
+                    }
+                    const normalized = parsed.toString();
+                    // Claude Code sessions usually live under /code/<id>.
+                    if (!normalized.includes("/code/")) return;
+                    if (normalized.endsWith("/code") || normalized.endsWith("/code/")) return;
+                    const key = normalized.split("/").filter(Boolean).pop() || normalized;
+                    const title = (titleHint || key || "").toString().trim() || key;
+                    const haystack = `${titleHint || ""} ${extraText || ""} ${key}`.toLowerCase();
+                    const remoteHint = haystack.includes("remote")
+                      || haystack.includes("computer")
+                      || key.startsWith("session_")
+                      || key.startsWith("cse_");
+                    const status = haystack.includes("archived")
+                      ? "archived"
+                      : haystack.includes("offline")
+                        ? "offline"
+                        : "unknown";
+                    seen.set(key, {
+                      session_key: key,
+                      title,
+                      url: normalized,
+                      kind: remoteHint ? "remote" : "unknown",
+                      status,
+                      control_supported: remoteHint,
+                    });
+                  }
+
+                  // 1) DOM links (covers most variants).
+                  for (const link of Array.from(document.querySelectorAll("a[href]"))) {
+                    const href = link.getAttribute("href") || link.href || "";
+                    const text = (link.innerText || link.textContent || "").trim();
+                    const label = link.getAttribute("aria-label") || "";
+                    pushCandidate(href, text || label, `${label} ${link.className || ""}`);
+                  }
+
+                  // 2) Next.js boot payload (sometimes includes recents before DOM links exist).
+                  const next = document.querySelector("script#__NEXT_DATA__");
+                  if (next && next.textContent) {
+                    try {
+                      const data = JSON.parse(next.textContent);
+                      const stack = [data];
+                      const maxNodes = 8000;
+                      let nodes = 0;
+                      while (stack.length && nodes < maxNodes) {
+                        const node = stack.pop();
+                        nodes++;
+                        if (!node) continue;
+                        if (typeof node === "string") {
+                          if (node.includes("/code/")) pushCandidate(node, null, "");
+                          continue;
+                        }
+                        if (Array.isArray(node)) {
+                          for (const v of node) stack.push(v);
+                          continue;
+                        }
+                        if (typeof node === "object") {
+                          for (const [k, v] of Object.entries(node)) {
+                            if (typeof v === "string") {
+                              const looksLikeSession =
+                                v.includes("/code/")
+                                || v.startsWith("session_")
+                                || v.startsWith("cse_");
+                              if (looksLikeSession) pushCandidate(v, null, k);
+                            } else {
+                              stack.push(v);
+                            }
+                          }
+                        }
+                      }
+                    } catch (e) {}
+                  }
+
+                  return Array.from(seen.values());
+                }
+                """,
+            )
+            if isinstance(sessions, list) and sessions:
+                return sessions
+            await page.wait_for_timeout(500)
+        return []
 
     async def _browser_json(self, page, path: str):
         return await page.evaluate(
@@ -379,18 +441,66 @@ class CamoufoxManager:
         return await context.new_page()
 
     async def _find_prompt_editor(self, page):
+        # Claude's remote control UI has changed a few times and may render the composer
+        # inside an iframe. We look across frames and rank editable, visible candidates,
+        # preferring the one closest to the bottom of the viewport.
         selectors = [
+            # Prefer stable ids/testids if present.
+            "[data-testid*='prompt' i]",
+            "[data-testid*='composer' i]",
+            # Generic fallbacks.
             "textarea",
-            "[contenteditable='true']",
+            "textarea[placeholder]",
             "[role='textbox']",
-            ".ProseMirror",
+            "[contenteditable='true']",
+            ".ProseMirror[contenteditable='true']",
         ]
+
+        deadline = asyncio.get_running_loop().time() + 30.0
         last_error: Exception | None = None
-        for selector in selectors:
-            try:
-                locator = page.locator(selector).last
-                await locator.wait_for(timeout=10_000)
-                return locator
-            except Exception as exc:  # noqa: BLE001 - Playwright raises implementation-specific errors
-                last_error = exc
+        while asyncio.get_running_loop().time() < deadline:
+            best = None
+            best_score = None
+            for frame in page.frames:
+                for selector in selectors:
+                    try:
+                        locator = frame.locator(selector)
+                        count = await locator.count()
+                    except Exception as exc:  # noqa: BLE001
+                        last_error = exc
+                        continue
+                    if not count:
+                        continue
+                    for i in range(count):
+                        candidate = locator.nth(i)
+                        try:
+                            box = await candidate.bounding_box()
+                        except Exception as exc:  # noqa: BLE001
+                            last_error = exc
+                            continue
+                        if not box:
+                            continue
+                        # Filter out tiny/irrelevant fields (e.g., search boxes/icons).
+                        if box.get("width", 0) < 120 or box.get("height", 0) < 18:
+                            continue
+                        try:
+                            editable = await candidate.is_editable()
+                        except Exception:
+                            editable = True
+                        if not editable:
+                            continue
+                        # Prefer the bottom-most editable candidate.
+                        # (Composer is usually anchored at the bottom.)
+                        score = float(box.get("y", 0) + box.get("height", 0))
+                        if best_score is None or score > best_score:
+                            best_score = score
+                            best = candidate
+            if best is not None:
+                try:
+                    await best.scroll_into_view_if_needed(timeout=2_000)
+                except Exception:
+                    pass
+                return best
+            await page.wait_for_timeout(250)
+
         raise BrowserError(f"Could not find Claude prompt editor: {last_error}")

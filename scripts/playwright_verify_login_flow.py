@@ -64,7 +64,7 @@ def api_get_json(url: str, timeout_s: int = 10) -> dict:
     return response.json()
 
 
-def api_post_json(url: str, timeout_s: int = 30) -> dict:
+def api_post_json(url: str, timeout_s: int = 90) -> dict:
     response = requests.post(url, timeout=timeout_s)
     if not response.ok:
         raise RuntimeError(f"POST {url} failed: {response.status_code} {response.text[:1000]}")
@@ -114,7 +114,7 @@ def main() -> None:
         vnc_url="http://127.0.0.1:47834/vnc.html?autoconnect=true&resize=scale&path=websockify",
         container="csw-pw-verify",
     )
-    image = "claude-session-watcher:novnc-ondemand-test2"
+    image = "claude-session-watcher:novnc-ondemand-test3"
 
     print("Starting container...")
     subprocess.run(["docker", "rm", "-f", targets.container], capture_output=True, text=True)
