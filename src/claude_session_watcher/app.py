@@ -263,7 +263,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/accounts/{account_id}/finish-login")
     async def finish_login(account_id: int):
-        await _finish_account_login(store, browser, account_id)
+        await _finish_account_login(store, browser, settings, account_id)
         return RedirectResponse("/", status_code=303)
 
     @app.post("/accounts/{account_id}/close-browser")
@@ -414,7 +414,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/api/accounts/{account_id}/finish-login")
     async def api_finish_login(account_id: int):
-        account = await _finish_account_login(store, browser, account_id)
+        account = await _finish_account_login(store, browser, settings, account_id)
         return await _browser_state(browser, display, account)
 
     @app.post("/api/accounts/{account_id}/close-browser")
@@ -607,6 +607,7 @@ async def _open_account_login(
 async def _finish_account_login(
     store: Store,
     browser: CamoufoxManager,
+    settings: Settings,
     account_id: int,
 ) -> Account:
     account = store.get_account(account_id)
@@ -615,6 +616,36 @@ async def _finish_account_login(
     try:
         if not has_session_key(profile_dir):
             await browser.session_key(profile_dir)
+        portal = await browser.code_portal_status(profile_dir)
+        if portal.get("disabled"):
+            if getattr(settings, "auto_switch_to_pro_plan", True):
+                store.add_account_event(
+                    account_watcher.id,
+                    "info",
+                    "Claude Code disabled. Attempting automatic profile switch to Pro plan...",
+                )
+                try:
+                    result = await browser.ensure_pro_plan(profile_dir)
+                except Exception as exc:  # noqa: BLE001
+                    result = {"ok": False, "reason": str(exc)}
+                if result.get("ok"):
+                    portal = await browser.code_portal_status(profile_dir)
+                if not portal.get("disabled"):
+                    await browser.close_profile(profile_dir)
+                    store.update_account_status(account_id, "logged-in")
+                    store.add_account_event(account_watcher.id, "info", "Login finished")
+                    return store.get_account(account_id)
+
+            message = str(portal.get("message") or "Claude Code disabled.")
+            store.update_account_status(account_id, "code-disabled", message)
+            store.add_account_event(
+                account_watcher.id,
+                "error",
+                f"Claude Code disabled for this organization: {message}",
+            )
+            # Keep the browser open so the user can switch profile/organization.
+            return store.get_account(account_id)
+
         await browser.close_profile(profile_dir)
         store.update_account_status(account_id, "logged-in")
         store.add_account_event(account_watcher.id, "info", "Login finished")

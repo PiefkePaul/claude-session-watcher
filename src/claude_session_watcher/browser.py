@@ -309,6 +309,52 @@ class CamoufoxManager:
             "reason": "Clicked Pro plan entry, but menu label did not update in time.",
         }
 
+    async def code_portal_status(self, profile_dir: Path, *, page=None) -> dict[str, Any]:
+        """Check whether claude.ai/code is usable for this profile.
+
+        Returns a dict with:
+          - url: final URL after navigation
+          - disabled: bool
+          - message: human-readable reason (when disabled)
+        """
+        context = await self.context_for_profile(profile_dir)
+        if page is None:
+            page = await self._get_or_open_page(context, "https://claude.ai/code")
+            await page.goto("https://claude.ai/code", wait_until="domcontentloaded")
+        # claude.ai/code often performs a client-side navigation shortly after initial load.
+        await page.wait_for_timeout(1500)
+        final_url = getattr(page, "url", "") or ""
+        disabled = self._is_code_disabled(final_url)
+        if not disabled:
+            try:
+                body_text = await page.evaluate(
+                    "() => document.body ? (document.body.innerText || '') : ''"
+                )
+            except Exception:
+                body_text = ""
+            normalized = (body_text or "").lower()
+            if "organiz" in normalized and ("deaktiv" in normalized or "disabled" in normalized):
+                disabled = True
+
+        if disabled:
+            return {
+                "url": final_url,
+                "disabled": True,
+                "message": (
+                    "Claude Code is disabled for this account/organization "
+                    "(redirected to /code/disabled). Switch to the correct profile/plan or "
+                    "ask your organization admin to enable Claude Code / Remote Control."
+                ),
+            }
+        return {"url": final_url, "disabled": False, "message": None}
+
+    @staticmethod
+    def _is_code_disabled(url: str) -> bool:
+        try:
+            return "/code/disabled" in (url or "")
+        except Exception:
+            return False
+
     @staticmethod
     async def _accept_cookies_banner(page) -> None:
         # Best-effort: the cookie banner can block clicks, especially on first use.

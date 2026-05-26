@@ -191,6 +191,7 @@ Environment variables:
 | `CSW_VNC_PORT` | `6080` in Docker | Container port for the noVNC browser console |
 | `CSW_VNC_SCREEN` | `1920x1080x24` in Docker | Virtual display size for Docker browser sessions |
 | `CSW_AUTO_FINISH_LOGIN` | `true` | Auto-finish login when the browser-console tab detects a Claude `sessionKey` |
+| `CSW_AUTO_SWITCH_TO_PRO_PLAN` | `true` | If `claude.ai/code` is disabled, attempt to switch the account profile/plan to Pro automatically during `Finish login` |
 | `CSW_NOTIFY_NTFY_URL` | unset | Optional ntfy topic URL for notifications |
 | `CSW_NOTIFY_NTFY_TOKEN` | unset | Optional bearer token for protected ntfy topics |
 
