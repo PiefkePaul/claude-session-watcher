@@ -152,6 +152,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                         )
                     elif name == "send_message":
                         summary = f"session_id={result.details.get('session_id')}"
+                    elif name == "oauth_usage":
+                        five = result.details.get("five_hour") or {}
+                        seven = result.details.get("seven_day") or {}
+                        summary = (
+                            f"source={result.details.get('source')}; "
+                            f"5h={five.get('utilization')}% 7d={seven.get('utilization')}%"
+                        )
+                    elif name == "capabilities":
+                        caps = result.details or {}
+                        fields = (
+                            "usage_get",
+                            "sessions_get",
+                            "events_get",
+                            "events_post",
+                            "oauth_usage_get",
+                        )
+                        rendered = []
+                        for field in fields:
+                            info = caps.get(field) if isinstance(caps, dict) else None
+                            if not isinstance(info, dict):
+                                continue
+                            if not info.get("checked"):
+                                rendered.append(f"{field}=n/a")
+                            else:
+                                rendered.append(
+                                    f"{field}={'yes' if info.get('supported') else 'no'}"
+                                )
+                        summary = ", ".join(rendered)
                     store.add_account_event(
                         account_watcher.id,
                         "info",

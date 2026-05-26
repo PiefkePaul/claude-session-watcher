@@ -160,6 +160,16 @@ def _build_parser() -> argparse.ArgumentParser:
         dest="send_message",
         help="Send a test user message via POST /v1/sessions/{id}/events (requires --session)",
     )
+    probe.add_argument(
+        "--no-oauth",
+        action="store_true",
+        help="Skip local Claude Code OAuth usage probe",
+    )
+    probe.add_argument(
+        "--oauth-credentials",
+        dest="oauth_credentials",
+        help="Optional path to .claude/.credentials.json for OAuth usage probe",
+    )
 
     session_add = subparsers.add_parser("session-add", help="Add a remote-control session")
     session_add.add_argument("title")
@@ -525,6 +535,10 @@ async def _probe(args, settings: Settings) -> int:
         Path(account.profile_dir),
         session_id=getattr(args, "session_id", None),
         send_message=getattr(args, "send_message", None),
+        include_oauth=not bool(getattr(args, "no_oauth", False)),
+        oauth_credentials_path=(
+            Path(args.oauth_credentials) if getattr(args, "oauth_credentials", None) else None
+        ),
     )
     payload = {
         name: {"ok": result.ok, "details": result.details} for name, result in results.items()

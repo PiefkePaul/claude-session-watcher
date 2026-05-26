@@ -124,6 +124,8 @@ Every successful usage check is stored as an account-scoped history sample. The 
 
 The primary usage source is the authenticated Claude browser profile. Statusline ingest is intentionally not part of the core workflow because this service usually does not run inside the Claude Code terminal. A future optional host bridge may add local Claude Code statusline telemetry, but the default product remains browser/profile based.
 
+`csw probe` can also test the local Claude Code OAuth usage endpoint (`https://api.anthropic.com/api/oauth/usage`) using `CLAUDE_CODE_OAUTH_TOKEN` or `~/.claude/.credentials.json` (`%USERPROFILE%\\.claude\\.credentials.json` on Windows).
+
 ## CLI
 
 ```bash
@@ -136,6 +138,9 @@ csw history PC
 csw history PC --json
 csw sessions PC
 csw discover PC
+csw probe PC --json
+csw probe PC --session session_... --send-message "continue"
+csw probe PC --no-oauth
 csw add main --account PC --remote-url https://claude.ai/code/...
 csw session-enable main
 csw session-disable main

@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from .oauth_usage import ClaudeOAuthUsageClient, load_oauth_access_token
 from .profile_cookies import load_claude_cookies
 from .session_list import ClaudeWebSessionsClient, SessionListAuthError
 from .usage import ClaudeUsageClient, UsageAuthError
@@ -20,6 +21,8 @@ async def probe_account(
     *,
     session_id: str | None = None,
     send_message: str | None = None,
+    include_oauth: bool = True,
+    oauth_credentials_path: Path | None = None,
 ) -> dict[str, ProbeResult]:
     """Run lightweight HTTP probes using claude.ai cookies (no browser automation).
 
@@ -150,4 +153,46 @@ async def probe_account(
         except (SessionListAuthError, Exception) as exc:  # noqa: BLE001
             results["send_message"] = ProbeResult(ok=False, details={"error": str(exc)})
 
+    # Optional: OAuth usage probe via local Claude Code credentials/token.
+    if include_oauth:
+        try:
+            token, source_path = load_oauth_access_token(oauth_credentials_path)
+            oauth_payload = await ClaudeOAuthUsageClient(token).fetch_raw()
+            five_hour = oauth_payload.get("five_hour")
+            seven_day = oauth_payload.get("seven_day")
+            results["oauth_usage"] = ProbeResult(
+                ok=True,
+                details={
+                    "source": str(source_path),
+                    "five_hour": five_hour if isinstance(five_hour, dict) else None,
+                    "seven_day": seven_day if isinstance(seven_day, dict) else None,
+                    "keys": sorted(str(key) for key in oauth_payload.keys()),
+                },
+            )
+        except Exception as exc:  # noqa: BLE001
+            results["oauth_usage"] = ProbeResult(ok=False, details={"error": str(exc)})
+
+    # Aggregate endpoint-level capability flags.
+    results["capabilities"] = ProbeResult(
+        ok=True,
+        details={
+            "usage_get": _capability_state(results, "usage"),
+            "sessions_get": _capability_state(results, "sessions"),
+            "events_get": _capability_state(results, "events"),
+            "events_post": _capability_state(results, "send_message"),
+            "oauth_usage_get": _capability_state(results, "oauth_usage"),
+        },
+    )
+
     return results
+
+
+def _capability_state(results: dict[str, ProbeResult], key: str) -> dict[str, Any]:
+    result = results.get(key)
+    if result is None:
+        return {"supported": None, "checked": False}
+    return {
+        "supported": bool(result.ok),
+        "checked": True,
+        "error": None if result.ok else result.details.get("error"),
+    }
