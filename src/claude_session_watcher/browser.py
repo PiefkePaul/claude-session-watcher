@@ -414,6 +414,8 @@ class CamoufoxManager:
         context = await self.context_for_profile(profile_dir)
         page = await self._get_or_open_page(context, remote_url)
         await page.goto(remote_url, wait_until="domcontentloaded")
+        # claude.ai/code can redirect client-side after domcontentloaded.
+        await page.wait_for_timeout(1500)
         if self._is_code_disabled(page.url):
             raise BrowserError(
                 "Cannot control session: Claude Code is disabled for this "
@@ -525,8 +527,22 @@ class CamoufoxManager:
         if page is None:
             page = await self._get_or_open_page(context, "https://claude.ai/code")
             await page.goto("https://claude.ai/code", wait_until="domcontentloaded")
+        # claude.ai/code often performs a client-side navigation shortly after initial load.
+        await page.wait_for_timeout(1500)
         final_url = getattr(page, "url", "") or ""
-        if self._is_code_disabled(final_url):
+        disabled = self._is_code_disabled(final_url)
+        if not disabled:
+            try:
+                body_text = await page.evaluate(
+                    "() => document.body ? (document.body.innerText || '') : ''"
+                )
+            except Exception:
+                body_text = ""
+            normalized = (body_text or "").lower()
+            if "organiz" in normalized and ("deaktiv" in normalized or "disabled" in normalized):
+                disabled = True
+
+        if disabled:
             return {
                 "url": final_url,
                 "disabled": True,
