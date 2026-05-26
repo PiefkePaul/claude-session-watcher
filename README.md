@@ -84,8 +84,20 @@ Open:
 http://localhost:47831
 ```
 
+The Docker image exposes an on-demand browser console for Claude login:
+
+```text
+http://localhost:47832/vnc.html?autoconnect=true&resize=scale&path=websockify
+```
+
+Click `Open login` in the watcher UI. The UI opens a browser-console tab and starts
+Xvfb, x11vnc, noVNC and Camoufox only for that login session. After Claude login and
+profile switch, the console tab auto-detects the Claude `sessionKey`, runs `Finish login`,
+and closes the browser stack. The `Finish login` and `Close browser` buttons remain
+available as fallbacks.
+
 The container stores browser profiles and SQLite state in the `csw-data` volume.
-The compose file binds the UI to `127.0.0.1:47831` on the host by default.
+The compose file binds the UI and browser console to `127.0.0.1` on the host by default.
 
 For local image development:
 
@@ -168,12 +180,17 @@ Environment variables:
 | `CSW_HOST` | `127.0.0.1` | Bind host |
 | `CSW_PORT` | `47831` | Web UI port |
 | `CSW_DATA_DIR` | platform data dir | SQLite DB, logs, browser profiles |
-| `CSW_CAMOUFOX_HEADLESS` | `virtual` | Camoufox headless mode |
+| `CSW_CAMOUFOX_HEADLESS` | `virtual`, `false` in Docker | Camoufox headless mode |
 | `CSW_CAMOUFOX_OS` | unset | Optional Camoufox fingerprint OS |
 | `CSW_BROWSER_KEEPALIVE` | `false` | Keep Camoufox open between checks |
 | `CSW_RESUME_SAFETY_MARGIN_SECONDS` | `120` | Extra wait after a known reset before continue |
 | `CSW_UI_TOKEN` | unset | Token required for protected web/API access |
 | `CSW_LOCAL_PORT_BIND_ONLY` | `false` | Allows container-internal `0.0.0.0` only when host port is locally bound |
+| `CSW_BROWSER_CONSOLE_URL` | unset | noVNC browser console URL used while Docker login browser is active |
+| `CSW_ENABLE_VNC` | `true` in Docker | Enable on-demand Xvfb, x11vnc and noVNC inside the Docker image |
+| `CSW_VNC_PORT` | `6080` in Docker | Container port for the noVNC browser console |
+| `CSW_VNC_SCREEN` | `1920x1080x24` in Docker | Virtual display size for Docker browser sessions |
+| `CSW_AUTO_FINISH_LOGIN` | `true` | Auto-finish login when the browser-console tab detects a Claude `sessionKey` |
 | `CSW_NOTIFY_NTFY_URL` | unset | Optional ntfy topic URL for notifications |
 | `CSW_NOTIFY_NTFY_TOKEN` | unset | Optional bearer token for protected ntfy topics |
 
@@ -200,6 +217,7 @@ Pause templates:
 - Each Claude account should use a separate Camoufox profile.
 - The service does not require manually storing `CLAUDE_SESSION_KEY` in SQLite.
 - The web UI refuses non-local binds unless `CSW_UI_TOKEN` is set or the Docker local-bind guard is enabled.
+- The Docker browser console exposes an interactive Claude browser session. Keep it bound to localhost or protect it behind a trusted reverse proxy.
 - Docker users should protect the persistent volume because it contains browser login state.
 - Auto-entering account passwords is intentionally not implemented in the MVP. Prefer interactive login.
 

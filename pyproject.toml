@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "claude-session-watcher"
-version = "0.1.0b1"
+version = "0.1.0b2"
 description = "Background watcher that pauses and resumes Claude Code Remote Control sessions near usage limits."
 readme = "README.md"
 requires-python = ">=3.11"

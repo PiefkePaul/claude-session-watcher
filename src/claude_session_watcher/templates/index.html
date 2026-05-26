@@ -12,7 +12,9 @@
         <h1>Claude Session Watcher</h1>
         <p>Account-based monitoring for selected Claude Code sessions.</p>
       </div>
-      <a class="button secondary" href="/health">Health</a>
+      <div class="actions">
+        <a class="button secondary" href="/health">Health</a>
+      </div>
     </header>
 
     <main class="layout">
@@ -53,8 +55,31 @@
               <p class="path">{{ row.account.profile_dir }}</p>
             </div>
             <div class="actions">
-              <form action="/accounts/{{ row.account.id }}/login" method="post">
-                <button type="submit" class="secondary">Open login</button>
+              <form action="/accounts/{{ row.account.id }}/login" method="post" data-login-form>
+                <button
+                  type="submit"
+                  class="secondary"
+                  data-open-login
+                  data-account-id="{{ row.account.id }}"
+                >
+                  Open login
+                </button>
+              </form>
+              {% if row.browser.console_url %}
+              <a
+                class="button secondary"
+                href="/browser-console?account_id={{ row.account.id }}"
+                target="_blank"
+                rel="noreferrer"
+              >
+                Browser console
+              </a>
+              {% endif %}
+              <form action="/accounts/{{ row.account.id }}/finish-login" method="post">
+                <button type="submit" class="secondary">Finish login</button>
+              </form>
+              <form action="/accounts/{{ row.account.id }}/close-browser" method="post">
+                <button type="submit" class="secondary">Close browser</button>
               </form>
               <form action="/accounts/{{ row.account.id }}/discover" method="post">
                 <button type="submit" class="secondary">Discover</button>
@@ -283,5 +308,32 @@
         </div>
       </section>
     </main>
+    <script>
+      for (const form of document.querySelectorAll("[data-login-form]")) {
+        form.addEventListener("submit", async (event) => {
+          const button = form.querySelector("[data-open-login]");
+          if (!button) return;
+          event.preventDefault();
+          const accountId = button.dataset.accountId;
+          const consoleWindow = window.open(
+            `/browser-console?account_id=${accountId}&wait=1`,
+            `csw-browser-console-${accountId}`,
+          );
+          button.disabled = true;
+          try {
+            const response = await fetch(`/api/accounts/${accountId}/login`, { method: "POST" });
+            if (!response.ok) throw new Error(await response.text());
+            if (consoleWindow) consoleWindow.focus();
+            window.setTimeout(() => window.location.reload(), 800);
+          } catch (error) {
+            button.disabled = false;
+            try {
+              if (consoleWindow && !consoleWindow.closed) consoleWindow.close();
+            } catch (e) {}
+            alert(`Open login failed: ${error.message}`);
+          }
+        });
+      }
+    </script>
   </body>
 </html>

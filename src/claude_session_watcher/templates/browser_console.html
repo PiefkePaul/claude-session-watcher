@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Browser Console - {{ account.name }}</title>
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body class="console-body">
+    <header class="topbar console-topbar">
+      <div>
+        <h1>{{ account.name }}</h1>
+        <p id="console-status">Starting browser console...</p>
+      </div>
+      <div class="actions">
+        <button type="button" class="secondary" id="finish-login">Finish login</button>
+        <button type="button" class="secondary" id="close-browser">Close browser</button>
+      </div>
+    </header>
+
+    <main class="console-layout">
+      <div class="console-placeholder" id="console-placeholder">
+        Waiting for the browser window...
+      </div>
+      <iframe
+        id="console-frame"
+        class="console-frame"
+        title="Browser console"
+        allow="clipboard-read; clipboard-write"
+      ></iframe>
+    </main>
+
+    <script>
+      const accountId = {{ account.id }};
+      const autoFinishLogin = {{ "true" if auto_finish_login else "false" }};
+      const waitForBrowser = {{ "true" if wait else "false" }};
+      const statusEl = document.getElementById("console-status");
+      const frame = document.getElementById("console-frame");
+      const placeholder = document.getElementById("console-placeholder");
+      const finishButton = document.getElementById("finish-login");
+      const closeButton = document.getElementById("close-browser");
+      let loadedConsoleUrl = null;
+      let finishInFlight = false;
+
+      function setStatus(message) {
+        statusEl.textContent = message;
+      }
+
+      async function postAction(action) {
+        const response = await fetch(`/api/accounts/${accountId}/${action}`, { method: "POST" });
+        if (!response.ok) throw new Error(await response.text());
+        return response.json();
+      }
+
+      async function finishLogin() {
+        if (finishInFlight) return;
+        finishInFlight = true;
+        try {
+          const state = await postAction("finish-login");
+          setStatus(state.login_detected ? "Login saved. Closing browser..." : "Login is not complete yet.");
+          if (state.login_detected || !state.browser_open) {
+            window.setTimeout(() => window.close(), 600);
+          }
+        } catch (error) {
+          setStatus(`Finish login failed: ${error.message}`);
+        } finally {
+          finishInFlight = false;
+        }
+      }
+
+      async function closeBrowser() {
+        try {
+          await postAction("close-browser");
+          setStatus("Browser closed.");
+          window.setTimeout(() => window.close(), 300);
+        } catch (error) {
+          setStatus(`Close failed: ${error.message}`);
+        }
+      }
+
+      async function pollState() {
+        try {
+          const response = await fetch(`/api/accounts/${accountId}/browser-state`);
+          if (!response.ok) throw new Error(await response.text());
+          const state = await response.json();
+          if (state.console_url && state.vnc_ready) {
+            if (loadedConsoleUrl !== state.console_url) {
+              frame.src = state.console_url;
+              loadedConsoleUrl = state.console_url;
+            }
+            frame.classList.add("visible");
+            placeholder.classList.add("hidden");
+            setStatus(state.login_detected ? "Login detected." : "Browser console is ready.");
+          } else if (state.browser_open || waitForBrowser) {
+            setStatus("Starting browser console...");
+          } else {
+            setStatus("No browser window is open.");
+          }
+          if (autoFinishLogin && state.login_detected && state.browser_open) {
+            await finishLogin();
+          }
+        } catch (error) {
+          setStatus(`Browser console unavailable: ${error.message}`);
+        } finally {
+          window.setTimeout(pollState, 1500);
+        }
+      }
+
+      finishButton.addEventListener("click", finishLogin);
+      closeButton.addEventListener("click", closeBrowser);
+      pollState();
+    </script>
+  </body>
+</html>

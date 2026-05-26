@@ -227,18 +227,18 @@ def _status(
     if near_five or near_seven:
         return "near-limit", "usage is near a configured threshold"
 
-    if _is_soon(next_pause_at, minutes=soon_window_minutes):
+    base_dt = _parse_dt(current.created_at) or datetime.now(UTC)
+    if _is_soon(next_pause_at, base_dt=base_dt, minutes=soon_window_minutes):
         return "near-limit", "projected to reach threshold soon"
 
     return "safe", "usage below configured thresholds"
 
 
-def _is_soon(value: str | None, *, minutes: int) -> bool:
+def _is_soon(value: str | None, *, base_dt: datetime, minutes: int) -> bool:
     dt = _parse_dt(value)
     if dt is None:
         return False
-    now = datetime.now(UTC)
-    return now <= dt <= now + timedelta(minutes=minutes)
+    return base_dt <= dt <= base_dt + timedelta(minutes=minutes)
 
 
 def _earliest(values: list[str | None]) -> str | None:

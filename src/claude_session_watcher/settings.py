@@ -32,6 +32,13 @@ class Settings(BaseSettings):
     resume_safety_margin_seconds: int = 120
     ui_token: str | None = None
     local_port_bind_only: bool = False
+    browser_console_url: str | None = None
+    enable_vnc: bool = False
+    vnc_port: int = 6080
+    vnc_screen: str = "1920x1080x24"
+    vnc_display: str = ":99"
+    vnc_web_root: str = "/usr/share/novnc/"
+    auto_finish_login: bool = True
     notify_ntfy_url: str | None = None
     notify_ntfy_token: str | None = None
 

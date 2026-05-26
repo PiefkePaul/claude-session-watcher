@@ -363,6 +363,45 @@ th {
   gap: 9px;
 }
 
+.console-body {
+  height: 100vh;
+  overflow: hidden;
+}
+
+.console-topbar {
+  padding: 16px 20px;
+}
+
+.console-layout {
+  position: relative;
+  height: calc(100vh - 87px);
+  background: #111827;
+}
+
+.console-placeholder {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  color: #d0d5dd;
+  font-weight: 700;
+}
+
+.console-placeholder.hidden {
+  display: none;
+}
+
+.console-frame {
+  display: none;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: #111827;
+}
+
+.console-frame.visible {
+  display: block;
+}
+
 .event {
   display: grid;
   grid-template-columns: 210px 60px minmax(0, 1fr);

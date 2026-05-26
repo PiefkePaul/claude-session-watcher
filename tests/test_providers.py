@@ -2,12 +2,22 @@ import pytest
 
 from claude_session_watcher.models import Account
 from claude_session_watcher.providers import FallbackUsageProvider, UsageFetchResult
-from claude_session_watcher.usage import ClaudeUsageClient, UsageError
+from claude_session_watcher.usage import ClaudeUsageClient, UsageAuthError, UsageLoginRequiredError
 
 
 class FailingProvider:
     async def fetch(self, account):
-        raise UsageError("no cookies")
+        raise UsageAuthError("invalid cookies")
+
+
+class CookieErrorProvider:
+    async def fetch(self, account):
+        raise OSError("cookie store unavailable")
+
+
+class LoginRequiredProvider:
+    async def fetch(self, account):
+        raise UsageLoginRequiredError("no cookies")
 
 
 class SuccessfulProvider:
@@ -23,7 +33,7 @@ class SuccessfulProvider:
 
 @pytest.mark.asyncio
 async def test_fallback_usage_provider_uses_browser_fallback_on_cookie_error():
-    provider = FallbackUsageProvider(FailingProvider(), SuccessfulProvider())
+    provider = FallbackUsageProvider(CookieErrorProvider(), SuccessfulProvider())
 
     result = await provider.fetch(
         Account(id=1, name="work", profile_dir="profile"),
@@ -31,3 +41,19 @@ async def test_fallback_usage_provider_uses_browser_fallback_on_cookie_error():
 
     assert result.source == "fallback"
     assert result.snapshot.five_hour.utilization == 1.0
+
+
+@pytest.mark.asyncio
+async def test_fallback_usage_provider_does_not_fallback_on_auth_error():
+    provider = FallbackUsageProvider(FailingProvider(), SuccessfulProvider())
+
+    with pytest.raises(UsageAuthError):
+        await provider.fetch(Account(id=1, name="work", profile_dir="profile"))
+
+
+@pytest.mark.asyncio
+async def test_fallback_usage_provider_does_not_open_browser_without_login():
+    provider = FallbackUsageProvider(LoginRequiredProvider(), SuccessfulProvider())
+
+    with pytest.raises(UsageLoginRequiredError):
+        await provider.fetch(Account(id=1, name="work", profile_dir="profile"))
