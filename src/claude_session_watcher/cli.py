@@ -16,6 +16,7 @@ from .insights import build_usage_insights
 from .models import AccountWatcher, ClaudeSession, utc_now
 from .notifications import NotificationEvent, notifier_from_settings
 from .pause_templates import CUSTOM_TEMPLATE, PAUSE_TEMPLATES
+from .probe import probe_account
 from .profile_cookies import load_claude_cookies
 from .service_control import service_status, start_service, stop_service
 from .settings import Settings
@@ -59,6 +60,8 @@ def main(argv: list[str] | None = None) -> int:
         return _sessions(args, settings)
     if args.command == "discover":
         return asyncio.run(_discover(args, settings))
+    if args.command == "probe":
+        return asyncio.run(_probe(args, settings))
     if args.command == "session-add":
         return _session_add(args, settings)
     if args.command == "session-enable":
@@ -143,6 +146,20 @@ def _build_parser() -> argparse.ArgumentParser:
 
     discover = subparsers.add_parser("discover", help="Discover sessions for an account")
     discover.add_argument("account", help="Account id or name")
+
+    probe = subparsers.add_parser("probe", help="Probe claude.ai HTTP capabilities for an account")
+    probe.add_argument("account", help="Account id or name")
+    probe.add_argument("--json", action="store_true", help="Print machine-readable JSON")
+    probe.add_argument(
+        "--session",
+        dest="session_id",
+        help="Optional session id (session_...) to probe events against",
+    )
+    probe.add_argument(
+        "--send-message",
+        dest="send_message",
+        help="Send a test user message via POST /v1/sessions/{id}/events (requires --session)",
+    )
 
     session_add = subparsers.add_parser("session-add", help="Add a remote-control session")
     session_add.add_argument("title")
@@ -499,6 +516,28 @@ async def _discover(args, settings: Settings) -> int:
         await browser.close()
     print(f"{account.name}: discovered {result.found}, updated {result.updated}")
     return 0
+
+
+async def _probe(args, settings: Settings) -> int:
+    store = _store(settings)
+    account = _resolve_account(store, args.account)
+    results = await probe_account(
+        Path(account.profile_dir),
+        session_id=getattr(args, "session_id", None),
+        send_message=getattr(args, "send_message", None),
+    )
+    payload = {
+        name: {"ok": result.ok, "details": result.details} for name, result in results.items()
+    }
+    if getattr(args, "json", False):
+        print(json.dumps(payload, indent=2))
+    else:
+        for name, result in results.items():
+            if result.ok:
+                print(f"ok   {name}")
+            else:
+                print(f"fail {name}: {result.details.get('error')}")
+    return 0 if all(result.ok for result in results.values()) else 1
 
 
 def _session_add(args, settings: Settings) -> int:

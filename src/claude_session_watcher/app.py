@@ -20,6 +20,7 @@ from .formatting import build_ui_watcher, format_timestamp
 from .insights import UsageInsights, build_usage_insights
 from .models import Account, AccountWatcher, ClaudeSession, Watcher, utc_now
 from .pause_templates import pause_template_options
+from .probe import probe_account
 from .profile_cookies import has_session_key
 from .settings import Settings
 from .store import Store
@@ -124,6 +125,46 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         except Exception as exc:  # noqa: BLE001
             account_watcher = store.ensure_account_watcher(account_id)
             store.add_account_event(account_watcher.id, "error", f"Discovery failed: {exc}")
+        return RedirectResponse("/", status_code=303)
+
+    @app.post("/accounts/{account_id}/probe")
+    async def probe_account_capabilities(account_id: int):
+        account = store.get_account(account_id)
+        account_watcher = store.ensure_account_watcher(account_id)
+        try:
+            results = await probe_account(Path(account.profile_dir))
+            for name, result in results.items():
+                if result.ok:
+                    summary = ""
+                    if name == "usage":
+                        five = result.details.get("five_hour") or {}
+                        seven = result.details.get("seven_day") or {}
+                        summary = (
+                            f"5h={five.get('utilization')}% reset={five.get('resets_at')}; "
+                            f"7d={seven.get('utilization')}% reset={seven.get('resets_at')}"
+                        )
+                    elif name == "sessions":
+                        summary = f"count={result.details.get('count')}"
+                    elif name == "events":
+                        summary = (
+                            f"session_id={result.details.get('session_id')} "
+                            f"title={result.details.get('title')}"
+                        )
+                    elif name == "send_message":
+                        summary = f"session_id={result.details.get('session_id')}"
+                    store.add_account_event(
+                        account_watcher.id,
+                        "info",
+                        f"Probe {name}: ok{(' (' + summary + ')') if summary else ''}",
+                    )
+                else:
+                    store.add_account_event(
+                        account_watcher.id,
+                        "warning",
+                        f"Probe {name}: failed ({result.details.get('error')})",
+                    )
+        except Exception as exc:  # noqa: BLE001
+            store.add_account_event(account_watcher.id, "error", f"Probe failed: {exc}")
         return RedirectResponse("/", status_code=303)
 
     @app.post("/account-watchers/{account_watcher_id}/check")
@@ -392,6 +433,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def api_discover_account(account_id: int):
         result = await discovery.discover_account(store.get_account(account_id))
         return {"account_id": account_id, "found": result.found, "updated": result.updated}
+
+    @app.post("/api/accounts/{account_id}/probe")
+    async def api_probe_account(account_id: int):
+        account = store.get_account(account_id)
+        results = await probe_account(Path(account.profile_dir))
+        return {
+            "account_id": account_id,
+            "results": {
+                name: {"ok": result.ok, "details": result.details}
+                for name, result in results.items()
+            },
+        }
 
     @app.post("/api/account-watchers/{account_watcher_id}/check")
     @app.post("/api/accounts/{account_watcher_id}/check")

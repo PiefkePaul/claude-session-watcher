@@ -84,6 +84,9 @@
               <form action="/accounts/{{ row.account.id }}/discover" method="post">
                 <button type="submit" class="secondary">Discover</button>
               </form>
+              <form action="/accounts/{{ row.account.id }}/probe" method="post">
+                <button type="submit" class="secondary">Probe</button>
+              </form>
               <form action="/account-watchers/{{ row.watcher.id }}/check" method="post">
                 <button type="submit" class="secondary">Check</button>
               </form>

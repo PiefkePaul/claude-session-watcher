@@ -126,3 +126,91 @@ class ClaudeWebSessionsClient:
                 break
             after_id = page.last_id
         return sessions
+
+    async def delete_session(self, session_id: str) -> None:
+        # The claude.ai UI issues a DELETE with an (empty) JSON body.
+        async with self._client() as client:
+            response = await client.request(
+                "DELETE",
+                f"https://claude.ai/v1/sessions/{session_id}",
+                content="{}",
+            )
+            self._raise_for_response(response)
+
+    async def archive_session(self, session_id: str) -> None:
+        async with self._client() as client:
+            response = await client.post(
+                f"https://claude.ai/v1/sessions/{session_id}/archive",
+                content="{}",
+            )
+            self._raise_for_response(response)
+
+    async def list_events(
+        self,
+        session_id: str,
+        *,
+        after_id: str | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        params: dict[str, object] = {}
+        if after_id:
+            params["after_id"] = after_id
+        if limit is not None:
+            params["limit"] = int(limit)
+        async with self._client() as client:
+            response = await client.get(
+                f"https://claude.ai/v1/sessions/{session_id}/events",
+                params=params or None,
+            )
+            self._raise_for_response(response)
+            data = response.json()
+        if not isinstance(data, dict):
+            raise SessionListError("Claude session events response was not a JSON object")
+        return data
+
+    async def send_user_message(self, session_id: str, text: str) -> None:
+        # We intentionally keep the payload compatible with the Managed Agents session
+        # events schema (events[] with a user_message event containing text blocks).
+        payload_candidates = [
+            {
+                "events": [
+                    {
+                        "type": "user_message",
+                        "content": [{"type": "text", "text": text}],
+                    }
+                ]
+            },
+            {
+                "events": [
+                    {
+                        "type": "user.message",
+                        "content": [{"type": "text", "text": text}],
+                    }
+                ]
+            },
+            {
+                "type": "user_message",
+                "content": [{"type": "text", "text": text}],
+            },
+            {
+                "type": "user.message",
+                "content": [{"type": "text", "text": text}],
+            },
+        ]
+
+        last_exc: Exception | None = None
+        async with self._client() as client:
+            for payload in payload_candidates:
+                try:
+                    response = await client.post(
+                        f"https://claude.ai/v1/sessions/{session_id}/events",
+                        json=payload,
+                    )
+                    self._raise_for_response(response)
+                    return
+                except Exception as exc:  # noqa: BLE001 - try next candidate
+                    last_exc = exc
+                    continue
+        if last_exc:
+            raise last_exc
+        raise SessionListError("Failed to send message (no payload candidates attempted)")
