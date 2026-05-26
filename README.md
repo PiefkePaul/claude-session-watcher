@@ -99,6 +99,8 @@ Xvfb, x11vnc, noVNC and Camoufox only for that login session. After Claude login
 profile switch, the console tab auto-detects the Claude `sessionKey`, runs `Finish login`,
 and closes the browser stack. The `Finish login` and `Close browser` buttons remain
 available as fallbacks.
+For Google users, the browser-console also provides a `Continue with Google` helper button
+that clicks the Google sign-in entry on `claude.ai/new` when visible.
 
 The container stores browser profiles and SQLite state in the `csw-data` volume.
 The compose file binds the UI and browser console to `127.0.0.1` on the host by default.
@@ -201,6 +203,7 @@ Environment variables:
 | `CSW_VNC_PORT` | `6080` in Docker | Container port for the noVNC browser console |
 | `CSW_VNC_SCREEN` | `1920x1080x24` in Docker | Virtual display size for Docker browser sessions |
 | `CSW_AUTO_FINISH_LOGIN` | `true` | Auto-finish login when the browser-console tab detects a Claude `sessionKey` |
+| `CSW_AUTO_START_GOOGLE_LOGIN` | `false` | Auto-click "Continue with Google" once after opening browser-console (best-effort helper) |
 | `CSW_AUTO_SWITCH_TO_PRO_PLAN` | `true` | If `claude.ai/code` is disabled, attempt to switch the account profile/plan to Pro automatically during `Finish login` |
 | `CSW_NOTIFY_NTFY_URL` | unset | Optional ntfy topic URL for notifications |
 | `CSW_NOTIFY_NTFY_TOKEN` | unset | Optional bearer token for protected ntfy topics |
@@ -231,6 +234,7 @@ Pause templates:
 - The Docker browser console exposes an interactive Claude browser session. Keep it bound to localhost or protect it behind a trusted reverse proxy.
 - Docker users should protect the persistent volume because it contains browser login state.
 - Auto-entering account passwords is intentionally not implemented in the MVP. Prefer interactive login.
+- Google OAuth pages can still require manual CAPTCHA/2FA confirmation. The helper only triggers the Google entry point.
 
 NAS example:
 

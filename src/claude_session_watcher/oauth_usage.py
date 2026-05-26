@@ -99,7 +99,9 @@ class ClaudeOAuthUsageClient:
         async with httpx.AsyncClient(headers=headers, timeout=15, follow_redirects=False) as client:
             response = await client.get("https://api.anthropic.com/api/oauth/usage")
         if response.status_code in {401, 403}:
-            raise OAuthUsageAuthError(f"OAuth usage request was rejected: HTTP {response.status_code}")
+            raise OAuthUsageAuthError(
+                f"OAuth usage request was rejected: HTTP {response.status_code}"
+            )
         if response.status_code == 429:
             raise OAuthUsageRateLimitError("OAuth usage request was rate-limited: HTTP 429")
         response.raise_for_status()
@@ -107,4 +109,3 @@ class ClaudeOAuthUsageClient:
         if not isinstance(payload, dict):
             raise OAuthUsageError("OAuth usage response was not a JSON object")
         return payload
-

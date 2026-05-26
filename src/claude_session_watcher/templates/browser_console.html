@@ -13,6 +13,7 @@
         <p id="console-status">Starting browser console...</p>
       </div>
       <div class="actions">
+        <button type="button" class="secondary" id="start-google-login">Continue with Google</button>
         <button type="button" class="secondary" id="finish-login">Finish login</button>
         <button type="button" class="secondary" id="close-browser">Close browser</button>
       </div>
@@ -33,14 +34,17 @@
     <script>
       const accountId = {{ account.id }};
       const autoFinishLogin = {{ "true" if auto_finish_login else "false" }};
+      const autoStartGoogleLogin = {{ "true" if auto_start_google_login else "false" }};
       const waitForBrowser = {{ "true" if wait else "false" }};
       const statusEl = document.getElementById("console-status");
       const frame = document.getElementById("console-frame");
       const placeholder = document.getElementById("console-placeholder");
       const finishButton = document.getElementById("finish-login");
+      const googleButton = document.getElementById("start-google-login");
       const closeButton = document.getElementById("close-browser");
       let loadedConsoleUrl = null;
       let finishInFlight = false;
+      let googleKickoffAttempted = false;
 
       function setStatus(message) {
         statusEl.textContent = message;
@@ -78,6 +82,24 @@
         }
       }
 
+      async function startGoogleLogin() {
+        try {
+          const state = await postAction("start-google-login");
+          const result = state.google_login || {};
+          if (result.already_logged_in) {
+            setStatus("Already logged in.");
+            return;
+          }
+          if (result.ok) {
+            setStatus("Google login started. Complete sign-in in the browser window.");
+          } else {
+            setStatus(result.reason || "Google login trigger did not find a button.");
+          }
+        } catch (error) {
+          setStatus(`Google login helper failed: ${error.message}`);
+        }
+      }
+
       async function pollState() {
         try {
           const response = await fetch(`/api/accounts/${accountId}/browser-state`);
@@ -96,6 +118,16 @@
           } else {
             setStatus("No browser window is open.");
           }
+          if (
+            autoStartGoogleLogin &&
+            state.browser_open &&
+            state.vnc_ready &&
+            !state.login_detected &&
+            !googleKickoffAttempted
+          ) {
+            googleKickoffAttempted = true;
+            await startGoogleLogin();
+          }
           if (autoFinishLogin && state.login_detected && state.browser_open) {
             await finishLogin();
           }
@@ -107,6 +139,7 @@
       }
 
       finishButton.addEventListener("click", finishLogin);
+      googleButton.addEventListener("click", startGoogleLogin);
       closeButton.addEventListener("click", closeBrowser);
       pollState();
     </script>

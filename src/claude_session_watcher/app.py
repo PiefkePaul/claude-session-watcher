@@ -311,6 +311,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "account": account,
                 "wait": wait,
                 "auto_finish_login": settings.auto_finish_login,
+                "auto_start_google_login": settings.auto_start_google_login,
             },
         )
 
@@ -441,6 +442,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def api_open_login(request: Request, account_id: int):
         account = await _open_account_login(store, browser, display, account_id)
         return await _browser_state(request, browser, display, settings, account)
+
+    @app.post("/api/accounts/{account_id}/start-google-login")
+    async def api_start_google_login(request: Request, account_id: int):
+        account = store.get_account(account_id)
+        account_watcher = store.ensure_account_watcher(account_id)
+        try:
+            result = await browser.start_google_login(Path(account.profile_dir))
+            detail = (
+                "Google login trigger executed"
+                if result.get("ok")
+                else f"Google login trigger failed: {result.get('reason')}"
+            )
+            level = "info" if result.get("ok") else "warning"
+            store.add_account_event(account_watcher.id, level, detail)
+            state = await _browser_state(request, browser, display, settings, account)
+            state["google_login"] = result
+            return state
+        except Exception as exc:  # noqa: BLE001
+            store.add_account_event(
+                account_watcher.id,
+                "error",
+                f"Google login helper failed: {exc}",
+            )
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
 
     @app.post("/api/accounts/{account_id}/finish-login")
     async def api_finish_login(request: Request, account_id: int):

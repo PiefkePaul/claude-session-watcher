@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -191,7 +191,7 @@ async def trace_remote_control(
     return {
         "remote_url": remote_url,
         "message": message,
-        "captured_at": datetime.now(timezone.utc).isoformat(),
+        "captured_at": datetime.now(UTC).isoformat(),
         "request_response_count": len(logs),
         "websocket_count": len(websockets),
         "logs": logs,
@@ -203,7 +203,7 @@ def main() -> int:
     args = _build_parser().parse_args()
     message = args.message
     if message == "__auto__":
-        message = f"csw remote trace {datetime.now(timezone.utc).isoformat()}"
+        message = f"csw remote trace {datetime.now(UTC).isoformat()}"
     result = asyncio.run(
         trace_remote_control(
             profile_dir=Path(args.profile_dir),
@@ -223,4 +223,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

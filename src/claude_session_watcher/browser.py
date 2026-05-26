@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -234,6 +235,63 @@ class CamoufoxManager:
             await page.bring_to_front()
         except Exception:
             pass
+
+    async def start_google_login(self, profile_dir: Path) -> dict[str, Any]:
+        """Best-effort helper for the common Claude "Continue with Google" flow.
+
+        This intentionally does not handle credentials. It only navigates to /new,
+        accepts cookie banners, and clicks a visible Google sign-in trigger.
+        """
+        context = await self.context_for_profile(profile_dir, headless=False, reset=False)
+        page = await self._get_or_open_page(context, "https://claude.ai/new")
+        await page.goto("https://claude.ai/new", wait_until="domcontentloaded")
+        try:
+            await page.bring_to_front()
+        except Exception:
+            pass
+
+        await self._accept_cookies_banner(page)
+
+        user_menu = page.locator('button[data-testid="user-menu-button"]').first
+        try:
+            await user_menu.wait_for(state="visible", timeout=2_000)
+            return {"ok": True, "already_logged_in": True}
+        except Exception:
+            pass
+
+        selectors: list[tuple[str, Any]] = [
+            (
+                "button-role-google",
+                page.get_by_role("button", name=re.compile("google", re.IGNORECASE)).first,
+            ),
+            (
+                "link-role-google",
+                page.get_by_role("link", name=re.compile("google", re.IGNORECASE)).first,
+            ),
+            ("button-text-google", page.locator("button:has-text('Google')").first),
+            ("link-text-google", page.locator("a:has-text('Google')").first),
+        ]
+
+        for name, locator in selectors:
+            try:
+                await locator.wait_for(state="visible", timeout=1_500)
+                before = len(context.pages)
+                await locator.click(timeout=2_500)
+                await page.wait_for_timeout(500)
+                if len(context.pages) > before:
+                    try:
+                        await context.pages[-1].bring_to_front()
+                    except Exception:
+                        pass
+                return {"ok": True, "clicked": True, "selector": name}
+            except Exception:
+                continue
+
+        return {
+            "ok": False,
+            "clicked": False,
+            "reason": "No visible Google sign-in button/link was found on claude.ai/new",
+        }
 
     async def ensure_pro_plan(self, profile_dir: Path, *, page=None) -> dict[str, Any]:
         """Best-effort attempt to switch the active Claude profile/plan to Pro.

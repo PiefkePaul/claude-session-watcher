@@ -40,6 +40,7 @@ class Settings(BaseSettings):
     vnc_display: str = ":99"
     vnc_web_root: str = "/usr/share/novnc/"
     auto_finish_login: bool = True
+    auto_start_google_login: bool = False
     auto_switch_to_pro_plan: bool = True
     notify_ntfy_url: str | None = None
     notify_ntfy_token: str | None = None

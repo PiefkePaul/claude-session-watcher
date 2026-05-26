@@ -36,6 +36,7 @@ def test_browser_console_url_env_is_loaded(monkeypatch):
     monkeypatch.setenv("CSW_VNC_PORT", "47832")
     monkeypatch.setenv("CSW_BROWSER_CONSOLE_PUBLIC_PORT", "47832")
     monkeypatch.setenv("CSW_AUTO_FINISH_LOGIN", "false")
+    monkeypatch.setenv("CSW_AUTO_START_GOOGLE_LOGIN", "true")
 
     settings = Settings()
 
@@ -44,3 +45,4 @@ def test_browser_console_url_env_is_loaded(monkeypatch):
     assert settings.enable_vnc is True
     assert settings.vnc_port == 47832
     assert settings.auto_finish_login is False
+    assert settings.auto_start_google_login is True
