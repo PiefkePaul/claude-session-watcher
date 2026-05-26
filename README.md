@@ -16,6 +16,7 @@ Early MVP. The core pieces are present:
 - account-based 5-hour and 7-day usage checks
 - selectable sessions under each account
 - best-effort session discovery from the Claude Code dashboard
+- cookie-based Pro-plan organization switch with menu-click fallback
 - reset-aware resume with a configurable safety margin
 - pause templates for minimal, worklog, and handoff-style checkpoints
 - usage history with burn-rate and pause-threshold projections

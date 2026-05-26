@@ -5,6 +5,7 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -331,7 +332,16 @@ class CamoufoxManager:
             current_text = ""
 
         if self._text_is_pro_plan(current_text):
-            return {"ok": True, "switched": False, "current": current_text}
+            return {"ok": True, "switched": False, "current": current_text, "method": "label-check"}
+
+        # Fast path discovered via runtime tracing:
+        # selecting a different profile/plan updates the `lastActiveOrg` cookie and
+        # the app reloads org-scoped data via GET requests. We can script this directly
+        # without brittle menu-item clicks by resolving the Pro org id from
+        # `/api/organizations` and setting `lastActiveOrg`.
+        cookie_switch = await self._switch_to_pro_by_cookie(context, page)
+        if cookie_switch.get("ok"):
+            return cookie_switch
 
         # Open the menu and try to click the Pro entry. The DOM is Radix-based and can
         # change, so we rely on role/testid + innerText heuristics.
@@ -359,12 +369,101 @@ class CamoufoxManager:
             except Exception:
                 updated = ""
             if self._text_is_pro_plan(updated):
-                return {"ok": True, "switched": True, "current": updated}
+                return {
+                    "ok": True,
+                    "switched": True,
+                    "current": updated,
+                    "method": "menu-click",
+                }
 
         return {
             "ok": True,
             "switched": True,
+            "method": "menu-click",
             "reason": "Clicked Pro plan entry, but menu label did not update in time.",
+        }
+
+    async def _switch_to_pro_by_cookie(self, context, page) -> dict[str, Any]:
+        try:
+            orgs = await self._browser_json(page, "/api/organizations")
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "ok": False,
+                "switched": False,
+                "reason": f"Could not load organizations for cookie-based switch: {exc}",
+            }
+        pro_org_id = self._pro_org_id_from_organizations(orgs)
+        if not pro_org_id:
+            return {
+                "ok": False,
+                "switched": False,
+                "reason": "No Pro-capable organization found in /api/organizations.",
+            }
+
+        current_org = await self._last_active_org_cookie(context)
+        if current_org == pro_org_id:
+            return {
+                "ok": True,
+                "switched": False,
+                "method": "org-cookie",
+                "org_id": pro_org_id,
+            }
+
+        expires_at = int((datetime.now(UTC) + timedelta(days=30)).timestamp())
+        try:
+            await context.add_cookies(
+                [
+                    {
+                        "name": "lastActiveOrg",
+                        "value": pro_org_id,
+                        "domain": ".claude.ai",
+                        "path": "/",
+                        "expires": expires_at,
+                        "httpOnly": False,
+                        "secure": True,
+                        "sameSite": "Lax",
+                    }
+                ]
+            )
+            await page.goto("https://claude.ai/new", wait_until="domcontentloaded")
+            await page.wait_for_timeout(900)
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "ok": False,
+                "switched": False,
+                "reason": f"Could not set lastActiveOrg cookie: {exc}",
+            }
+
+        # Verification 1: UI label now shows Pro.
+        try:
+            menu_button = page.locator('button[data-testid="user-menu-button"]').first
+            await menu_button.wait_for(state="visible", timeout=5_000)
+            current_text = (await menu_button.inner_text(timeout=2_000)) or ""
+            if self._text_is_pro_plan(current_text):
+                return {
+                    "ok": True,
+                    "switched": True,
+                    "method": "org-cookie",
+                    "org_id": pro_org_id,
+                    "current": current_text,
+                }
+        except Exception:
+            pass
+
+        # Verification 2: fallback to cookie value.
+        current_org = await self._last_active_org_cookie(context)
+        if current_org == pro_org_id:
+            return {
+                "ok": True,
+                "switched": True,
+                "method": "org-cookie",
+                "org_id": pro_org_id,
+                "reason": "lastActiveOrg updated; menu label update not yet observed.",
+            }
+        return {
+            "ok": False,
+            "switched": False,
+            "reason": "Cookie-based switch did not take effect.",
         }
 
     async def code_portal_status(self, profile_dir: Path, *, page=None) -> dict[str, Any]:
@@ -433,6 +532,36 @@ class CamoufoxManager:
                         return
             except Exception:
                 continue
+
+    @staticmethod
+    async def _last_active_org_cookie(context) -> str | None:
+        try:
+            cookies = await context.cookies("https://claude.ai")
+        except Exception:
+            return None
+        for cookie in cookies:
+            if cookie.get("name") == "lastActiveOrg":
+                value = cookie.get("value")
+                if value:
+                    return str(value)
+        return None
+
+    @classmethod
+    def _pro_org_id_from_organizations(cls, value: Any) -> str | None:
+        if not isinstance(value, list):
+            return None
+        for item in value:
+            if not isinstance(item, dict):
+                continue
+            org_id = str(item.get("uuid") or item.get("id") or "").strip()
+            if not org_id:
+                continue
+            caps = item.get("capabilities")
+            if isinstance(caps, list):
+                lowered = {str(cap).strip().lower() for cap in caps}
+                if "claude_pro" in lowered:
+                    return org_id
+        return None
 
     @staticmethod
     def _text_is_pro_plan(text: str) -> bool:

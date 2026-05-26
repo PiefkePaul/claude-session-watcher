@@ -758,6 +758,19 @@ async def _finish_account_login(
                     result = await browser.ensure_pro_plan(profile_dir)
                 except Exception as exc:  # noqa: BLE001
                     result = {"ok": False, "reason": str(exc)}
+                switch_method = result.get("method")
+                if switch_method:
+                    store.add_account_event(
+                        account_watcher.id,
+                        "info",
+                        f"Pro switch method: {switch_method}",
+                    )
+                if result.get("reason"):
+                    store.add_account_event(
+                        account_watcher.id,
+                        "info" if result.get("ok") else "warning",
+                        f"Pro switch detail: {result.get('reason')}",
+                    )
                 if result.get("ok"):
                     portal = await browser.code_portal_status(profile_dir)
                 if not portal.get("disabled"):
