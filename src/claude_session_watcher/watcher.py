@@ -5,7 +5,12 @@ import json
 import random
 
 from .browser import CamoufoxManager
-from .controller import BrowserSessionController, SessionController
+from .controller import (
+    BrowserSessionController,
+    FallbackSessionController,
+    HttpSessionController,
+    SessionController,
+)
 from .engine import WatcherEngine
 from .models import Account, AccountWatcher, Watcher
 from .notifications import NotificationEvent, Notifier, notifier_from_settings
@@ -38,10 +43,16 @@ class WatcherService:
             CamoufoxCookiesHttpUsageProvider(),
             CamoufoxBrowserUsageProvider(browser, keepalive=settings.browser_keepalive),
         )
-        self.session_controller = session_controller or BrowserSessionController(
-            browser,
-            keepalive=settings.browser_keepalive,
-        )
+        if session_controller is None:
+            self.session_controller = FallbackSessionController(
+                HttpSessionController(),
+                BrowserSessionController(
+                    browser,
+                    keepalive=settings.browser_keepalive,
+                ),
+            )
+        else:
+            self.session_controller = session_controller
         self.engine = engine or WatcherEngine(
             resume_safety_margin_seconds=getattr(settings, "resume_safety_margin_seconds", 120)
         )

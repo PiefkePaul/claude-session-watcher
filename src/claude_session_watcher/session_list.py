@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import Any
+from uuid import uuid4
 
 import httpx
 
@@ -169,9 +170,34 @@ class ClaudeWebSessionsClient:
         return data
 
     async def send_user_message(self, session_id: str, text: str) -> None:
-        # We intentionally keep the payload compatible with the Managed Agents session
-        # events schema (events[] with a user_message event containing text blocks).
+        # Observed from claude.ai/code remote control:
+        # POST /v1/sessions/{id}/events
+        # {
+        #   "events":[
+        #     {
+        #       "type":"user",
+        #       "uuid":"...",
+        #       "session_id":"session_...",
+        #       "parent_tool_use_id":null,
+        #       "message":{"role":"user","content":"..."}
+        #     }
+        #   ]
+        # }
+        primary_payload = {
+            "events": [
+                {
+                    "type": "user",
+                    "uuid": str(uuid4()),
+                    "session_id": session_id,
+                    "parent_tool_use_id": None,
+                    "message": {"role": "user", "content": text},
+                }
+            ]
+        }
+
+        # Fallback payloads kept for compatibility experiments.
         payload_candidates = [
+            primary_payload,
             {
                 "events": [
                     {
@@ -207,6 +233,20 @@ class ClaudeWebSessionsClient:
                         json=payload,
                     )
                     self._raise_for_response(response)
+                    try:
+                        data = response.json()
+                    except Exception:  # noqa: BLE001
+                        return
+                    # Soft verification: prefer responses that echo a user event.
+                    if isinstance(data, dict):
+                        events = data.get("events")
+                        if isinstance(events, list) and any(
+                            isinstance(event, dict) and event.get("type") == "user"
+                            for event in events
+                        ):
+                            return
+                    # If endpoint accepted payload but response is not event-shaped,
+                    # still treat as success to preserve compatibility.
                     return
                 except Exception as exc:  # noqa: BLE001 - try next candidate
                     last_exc = exc
