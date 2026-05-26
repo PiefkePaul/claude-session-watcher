@@ -61,6 +61,7 @@
                   class="secondary"
                   data-open-login
                   data-account-id="{{ row.account.id }}"
+                  data-display-enabled="{{ '1' if row.browser.display_enabled else '0' }}"
                 >
                   Open login
                 </button>
@@ -318,10 +319,13 @@
           if (!button) return;
           event.preventDefault();
           const accountId = button.dataset.accountId;
-          const consoleWindow = window.open(
-            `/browser-console?account_id=${accountId}&wait=1`,
-            `csw-browser-console-${accountId}`,
-          );
+          const shouldOpenConsole = button.dataset.displayEnabled === "1";
+          const consoleWindow = shouldOpenConsole
+            ? window.open(
+                `/browser-console?account_id=${accountId}&wait=1`,
+                `csw-browser-console-${accountId}`,
+              )
+            : null;
           button.disabled = true;
           try {
             const response = await fetch(`/api/accounts/${accountId}/login`, { method: "POST" });
