@@ -282,6 +282,9 @@ class CamoufoxManager:
         context = await self.context_for_profile(profile_dir)
         page = await self._get_or_open_page(context, "https://claude.ai/code")
         await page.goto("https://claude.ai/code", wait_until="domcontentloaded")
+        status = await self.code_portal_status(profile_dir, page=page)
+        if status.get("disabled"):
+            raise BrowserError(status.get("message") or "Claude Code is disabled.")
 
         # The session list is rendered client-side; give the app a brief moment to populate
         # "Recents" before scraping. We avoid relying on brittle CSS selectors and instead
@@ -411,6 +414,11 @@ class CamoufoxManager:
         context = await self.context_for_profile(profile_dir)
         page = await self._get_or_open_page(context, remote_url)
         await page.goto(remote_url, wait_until="domcontentloaded")
+        if self._is_code_disabled(page.url):
+            raise BrowserError(
+                "Cannot control session: Claude Code is disabled for this "
+                "account/organization (redirected to /code/disabled)."
+            )
         editor = await self._find_prompt_editor(page)
         await editor.fill(prompt)
         await editor.press("Enter")
@@ -504,3 +512,35 @@ class CamoufoxManager:
             await page.wait_for_timeout(250)
 
         raise BrowserError(f"Could not find Claude prompt editor: {last_error}")
+
+    async def code_portal_status(self, profile_dir: Path, *, page=None) -> dict[str, Any]:
+        """Check whether claude.ai/code is usable for this profile.
+
+        Returns a dict with:
+          - url: final URL after navigation
+          - disabled: bool
+          - message: human-readable reason (when disabled)
+        """
+        context = await self.context_for_profile(profile_dir)
+        if page is None:
+            page = await self._get_or_open_page(context, "https://claude.ai/code")
+            await page.goto("https://claude.ai/code", wait_until="domcontentloaded")
+        final_url = getattr(page, "url", "") or ""
+        if self._is_code_disabled(final_url):
+            return {
+                "url": final_url,
+                "disabled": True,
+                "message": (
+                    "Claude Code is disabled for this account/organization "
+                    "(redirected to /code/disabled). Switch to the correct profile/plan or "
+                    "ask your organization admin to enable Claude Code / Remote Control."
+                ),
+            }
+        return {"url": final_url, "disabled": False, "message": None}
+
+    @staticmethod
+    def _is_code_disabled(url: str) -> bool:
+        try:
+            return "/code/disabled" in (url or "")
+        except Exception:
+            return False

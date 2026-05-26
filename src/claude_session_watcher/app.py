@@ -562,6 +562,17 @@ async def _finish_account_login(
     try:
         if not has_session_key(profile_dir):
             await browser.session_key(profile_dir)
+        portal = await browser.code_portal_status(profile_dir)
+        if portal.get("disabled"):
+            message = str(portal.get("message") or "Claude Code disabled.")
+            store.update_account_status(account_id, "code-disabled", message)
+            store.add_account_event(
+                account_watcher.id,
+                "error",
+                f"Claude Code disabled for this organization: {message}",
+            )
+            # Keep the browser open so the user can switch profile/organization.
+            return store.get_account(account_id)
         await browser.close_profile(profile_dir)
         store.update_account_status(account_id, "logged-in")
         store.add_account_event(account_watcher.id, "info", "Login finished")
