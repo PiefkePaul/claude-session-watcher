@@ -57,6 +57,10 @@
         finishInFlight = true;
         try {
           const state = await postAction("finish-login");
+          if (state.status === "code-disabled") {
+            setStatus("Claude Code is disabled for the currently selected profile/plan. Switch to your Pro plan in Claude (bottom-left profile menu) and click Finish login again.");
+            return;
+          }
           setStatus(state.login_detected ? "Login saved. Closing browser..." : "Login is not complete yet.");
           if (state.login_detected || !state.browser_open) {
             window.setTimeout(() => window.close(), 600);
@@ -96,7 +100,7 @@
           } else {
             setStatus("No browser window is open.");
           }
-          if (autoFinishLogin && state.login_detected && state.browser_open) {
+          if (autoFinishLogin && state.login_detected && state.browser_open && state.status !== "code-disabled") {
             await finishLogin();
           }
         } catch (error) {

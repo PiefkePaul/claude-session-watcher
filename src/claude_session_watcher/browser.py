@@ -218,9 +218,194 @@ class CamoufoxManager:
         # Be idempotent: if a login browser is already open, reuse it instead of
         # resetting (resetting while the wrapper is polling can be flaky).
         context = await self.context_for_profile(profile_dir, headless=False, reset=False)
-        page = await self._get_or_open_page(context, "https://claude.ai/code")
+        # Use /new instead of /code:
+        # - /new reliably shows the profile/plan picker (needed when the user has both Free/Pro)
+        # - /code can redirect to /code/disabled before the user can switch plans
+        page = await self._get_or_open_page(context, "https://claude.ai/new")
         if not page.url.startswith("https://claude.ai/"):
-            await page.goto("https://claude.ai/code", wait_until="domcontentloaded")
+            await page.goto("https://claude.ai/new", wait_until="domcontentloaded")
+        else:
+            await page.goto("https://claude.ai/new", wait_until="domcontentloaded")
+        try:
+            await page.bring_to_front()
+        except Exception:
+            pass
+
+    async def ensure_pro_plan(self, profile_dir: Path, *, page=None) -> dict[str, Any]:
+        """Best-effort attempt to switch the active Claude profile/plan to Pro.
+
+        This is needed when a user has multiple profiles (e.g. Free + Pro) and Claude Code
+        is disabled for the currently selected one. The profile switcher is available on
+        https://claude.ai/new, not reliably on /code.
+        """
+        context = await self.context_for_profile(profile_dir, headless=False, reset=False)
+        if page is None:
+            page = await self._get_or_open_page(context, "https://claude.ai/new")
+        try:
+            await page.goto("https://claude.ai/new", wait_until="domcontentloaded")
+        except Exception:
+            # If navigation fails, keep going with whatever page we have.
+            pass
+        try:
+            await page.bring_to_front()
+        except Exception:
+            pass
+
+        await self._accept_cookies_banner(page)
+
+        menu_button = page.locator('button[data-testid="user-menu-button"]').first
+        try:
+            await menu_button.wait_for(state="visible", timeout=30_000)
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "ok": False,
+                "switched": False,
+                "reason": f"Could not find profile menu button: {exc}",
+            }
+
+        try:
+            current_text = (await menu_button.inner_text(timeout=2_000)) or ""
+        except Exception:
+            current_text = ""
+
+        if self._text_is_pro_plan(current_text):
+            return {"ok": True, "switched": False, "current": current_text}
+
+        # Open the menu and try to click the Pro entry. The DOM is Radix-based and can
+        # change, so we rely on role/testid + innerText heuristics.
+        try:
+            await menu_button.click()
+        except Exception as exc:  # noqa: BLE001
+            return {"ok": False, "switched": False, "reason": f"Could not open menu: {exc}"}
+
+        await page.wait_for_timeout(250)
+
+        switched = await self._click_pro_plan_entry(page)
+        if not switched:
+            return {
+                "ok": False,
+                "switched": False,
+                "reason": "Could not find a Pro profile entry in the menu.",
+                "current": current_text,
+            }
+
+        # Wait for the button text to reflect the selected plan.
+        for _ in range(40):
+            await page.wait_for_timeout(250)
+            try:
+                updated = (await menu_button.inner_text(timeout=2_000)) or ""
+            except Exception:
+                updated = ""
+            if self._text_is_pro_plan(updated):
+                return {"ok": True, "switched": True, "current": updated}
+
+        return {
+            "ok": True,
+            "switched": True,
+            "reason": "Clicked Pro plan entry, but menu label did not update in time.",
+        }
+
+    @staticmethod
+    async def _accept_cookies_banner(page) -> None:
+        # Best-effort: the cookie banner can block clicks, especially on first use.
+        candidates = [
+            "text=Alle Cookies akzeptieren",
+            "text=Accept all cookies",
+            "text=Accept all",
+            "button:has-text(\"Alle Cookies akzeptieren\")",
+            "button:has-text(\"Accept all\")",
+        ]
+        for selector in candidates:
+            try:
+                locator = page.locator(selector).first
+                if await locator.count():
+                    if await locator.is_visible(timeout=300):
+                        await locator.click(timeout=2_000)
+                        await page.wait_for_timeout(250)
+                        return
+            except Exception:
+                continue
+
+    @staticmethod
+    def _text_is_pro_plan(text: str) -> bool:
+        normalized = (text or "").strip().lower()
+        if not normalized:
+            return False
+        # Common UI strings observed across locales.
+        if "pro-plan" in normalized or "pro plan" in normalized:
+            return True
+        # Sometimes the plan label is just "Pro".
+        # Use a conservative check to avoid matching "profile".
+        tokens = {t for t in normalized.replace("\n", " ").replace("\r", " ").split(" ") if t}
+        return "pro" in tokens
+
+    async def _click_pro_plan_entry(self, page) -> bool:
+        # Radix menu content: role=menu or data-radix-menu-content.
+        menu = page.locator("div[role='menu'], div[data-radix-menu-content]").last
+        try:
+            await menu.wait_for(state="visible", timeout=5_000)
+        except Exception:
+            # Fallback: scan the whole page, but prefer menu-like containers.
+            menu = page.locator("body")
+
+        # Try the most specific and safe patterns first.
+        patterns = [
+            r"pro-plan",
+            r"pro plan",
+            r"\bpro\b",
+        ]
+
+        js_patterns = patterns
+        try:
+            result = await page.evaluate(
+                """
+                (args) => {
+                  const { patterns } = args;
+                  const regexes = patterns.map((p) => {
+                    try { return new RegExp(p, "i"); } catch (e) { return null; }
+                  }).filter(Boolean);
+                  const menus = Array.from(document.querySelectorAll("div[role='menu'], div[data-radix-menu-content]"))
+                    .filter((el) => el && el.offsetParent !== null);
+                  const scope = menus.length ? menus[menus.length - 1] : document.body;
+                  const candidates = Array.from(scope.querySelectorAll("button,[role='menuitemradio'],[role='menuitem'],a,[data-state]"));
+                  function textOf(el) {
+                    return (el.innerText || el.textContent || "").trim();
+                  }
+                  function isPro(el) {
+                    const t = textOf(el);
+                    if (!t) return false;
+                    return regexes.some((re) => re.test(t));
+                  }
+                  // Prefer an unchecked radio item that mentions Pro.
+                  const unchecked = candidates.find((el) => el.getAttribute("data-state") === "unchecked" && isPro(el));
+                  const any = candidates.find((el) => isPro(el) && el.getAttribute("data-state") !== "checked");
+                  const target = unchecked || any;
+                  if (!target) {
+                    return { clicked: false };
+                  }
+                  const clickable = target.closest("button,[role='menuitemradio'],[role='menuitem'],a") || target;
+                  clickable.click();
+                  return { clicked: true, text: textOf(target), dataState: target.getAttribute("data-state") };
+                }
+                """,
+                {"patterns": js_patterns},
+            )
+        except Exception:
+            result = None
+
+        if isinstance(result, dict) and result.get("clicked"):
+            return True
+
+        # Last resort: locate by text in Playwright and click the first actionable hit.
+        for needle in ["Pro-Plan", "Pro plan", "Pro"]:
+            try:
+                loc = page.locator(f"text={needle}").first
+                if await loc.count() and await loc.is_visible(timeout=300):
+                    await loc.click(timeout=2_000)
+                    return True
+            except Exception:
+                continue
+        return False
 
     async def session_key(self, profile_dir: Path) -> str:
         context = await self.context_for_profile(profile_dir)
