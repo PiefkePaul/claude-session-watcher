@@ -6,7 +6,9 @@ import re
 import secrets
 import traceback
 from contextlib import asynccontextmanager
+from ipaddress import ip_address
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -90,7 +92,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def index(request: Request):
         accounts = store.list_accounts()
         account_rows = [
-            await _account_row(store, browser, display, account)
+            await _account_row(request, store, browser, display, settings, account)
             for account in accounts
         ]
         events = store.list_account_events(limit=50)
@@ -431,24 +433,24 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return [_api_session(session) for session in store.list_sessions(account_id)]
 
     @app.get("/api/accounts/{account_id}/browser-state")
-    async def api_account_browser_state(account_id: int):
+    async def api_account_browser_state(request: Request, account_id: int):
         account = store.get_account(account_id)
-        return await _browser_state(browser, display, account)
+        return await _browser_state(request, browser, display, settings, account)
 
     @app.post("/api/accounts/{account_id}/login")
-    async def api_open_login(account_id: int):
+    async def api_open_login(request: Request, account_id: int):
         account = await _open_account_login(store, browser, display, account_id)
-        return await _browser_state(browser, display, account)
+        return await _browser_state(request, browser, display, settings, account)
 
     @app.post("/api/accounts/{account_id}/finish-login")
-    async def api_finish_login(account_id: int):
+    async def api_finish_login(request: Request, account_id: int):
         account = await _finish_account_login(store, browser, settings, account_id)
-        return await _browser_state(browser, display, account)
+        return await _browser_state(request, browser, display, settings, account)
 
     @app.post("/api/accounts/{account_id}/close-browser")
-    async def api_close_browser(account_id: int):
+    async def api_close_browser(request: Request, account_id: int):
         account = await _close_account_browser(store, browser, account_id)
-        return await _browser_state(browser, display, account)
+        return await _browser_state(request, browser, display, settings, account)
 
     @app.get("/api/account-watchers/{account_watcher_id}/usage-history")
     async def api_usage_history(account_watcher_id: int, limit: int = 200):
@@ -546,9 +548,11 @@ def _valid_auth_header(authorization: str, token: str) -> bool:
 
 
 async def _account_row(
+    request: Request,
     store: Store,
     browser: CamoufoxManager,
     display: DisplayManager,
+    settings: Settings,
     account: Account,
 ) -> dict[str, object]:
     if account.id is None:
@@ -557,7 +561,7 @@ async def _account_row(
     sessions = store.list_sessions(account.id)
     samples = store.list_usage_samples(account_watcher.id)
     insights = build_usage_insights(account_watcher, samples)
-    browser_state = await _browser_state(browser, display, account)
+    browser_state = await _browser_state(request, browser, display, settings, account)
     return {
         "account": account,
         "watcher": account_watcher,
@@ -573,8 +577,10 @@ async def _account_row(
 
 
 async def _browser_state(
+    request: Request,
     browser: CamoufoxManager,
     display: DisplayManager,
+    settings: Settings,
     account: Account,
 ) -> dict[str, object]:
     profile_dir = Path(account.profile_dir)
@@ -593,11 +599,82 @@ async def _browser_state(
         "display_enabled": display_state.enabled,
         "display_running": display_state.running,
         "vnc_ready": display_state.ready,
-        "console_url": display_state.console_url if browser_open else None,
+        "console_url": (
+            _resolve_console_url(request, settings, display_state) if browser_open else None
+        ),
         "login_detected": login_detected,
         "status": account.status,
         "last_error": account.last_error or store_error,
     }
+
+
+def _resolve_console_url(
+    request: Request,
+    settings: Settings,
+    display_state,
+) -> str | None:
+    configured = settings.browser_console_url
+    if configured:
+        parsed = urlsplit(configured)
+        configured_host = parsed.hostname
+        request_host = request.url.hostname
+        if (
+            _is_loopback_host(configured_host)
+            and request_host
+            and not _is_loopback_host(request_host)
+        ):
+            port = (
+                settings.browser_console_public_port
+                if settings.browser_console_public_port is not None
+                else parsed.port
+            )
+            scheme = request.url.scheme or parsed.scheme or "http"
+            return _build_url(
+                scheme=scheme,
+                host=request_host,
+                port=port,
+                path=parsed.path or "/vnc.html",
+                query=parsed.query,
+            )
+        return configured
+
+    request_host = request.url.hostname
+    if not request_host:
+        return None
+    port = (
+        settings.browser_console_public_port
+        if settings.browser_console_public_port is not None
+        else display_state.vnc_port
+    )
+    return _build_url(
+        scheme=request.url.scheme or "http",
+        host=request_host,
+        port=port,
+        path="/vnc.html",
+        query="autoconnect=true&resize=scale&path=websockify",
+    )
+
+
+def _build_url(*, scheme: str, host: str, port: int | None, path: str, query: str) -> str:
+    default_port = 443 if scheme == "https" else 80
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    netloc = host
+    if port is not None and port != default_port:
+        netloc = f"{host}:{port}"
+    return urlunsplit((scheme, netloc, path, query, ""))
+
+
+def _is_loopback_host(host: str | None) -> bool:
+    if not host:
+        return False
+    normalized = host.strip().lower().strip("[]")
+    if normalized in {"localhost", "127.0.0.1", "::1"}:
+        return True
+    try:
+        return ip_address(normalized).is_loopback
+    except ValueError:
+        return False
 
 
 async def _open_account_login(

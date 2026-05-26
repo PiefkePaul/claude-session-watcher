@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     ui_token: str | None = None
     local_port_bind_only: bool = False
     browser_console_url: str | None = None
+    browser_console_public_port: int | None = None
     enable_vnc: bool = False
     vnc_port: int = 6080
     vnc_screen: str = "1920x1080x24"

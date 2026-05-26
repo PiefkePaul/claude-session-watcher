@@ -90,6 +90,10 @@ The Docker image exposes an on-demand browser console for Claude login:
 http://localhost:47832/vnc.html?autoconnect=true&resize=scale&path=websockify
 ```
 
+If you run the UI on a custom host port (for example on NAS), publish a second host
+port for noVNC and set `CSW_BROWSER_CONSOLE_PUBLIC_PORT` to that host port so the
+wrapper can build a reachable URL.
+
 Click `Open login` in the watcher UI. The UI opens a browser-console tab and starts
 Xvfb, x11vnc, noVNC and Camoufox only for that login session. After Claude login and
 profile switch, the console tab auto-detects the Claude `sessionKey`, runs `Finish login`,
@@ -192,6 +196,7 @@ Environment variables:
 | `CSW_UI_TOKEN` | unset | Token required for protected web/API access |
 | `CSW_LOCAL_PORT_BIND_ONLY` | `false` | Allows container-internal `0.0.0.0` only when host port is locally bound |
 | `CSW_BROWSER_CONSOLE_URL` | unset | noVNC browser console URL used while Docker login browser is active |
+| `CSW_BROWSER_CONSOLE_PUBLIC_PORT` | unset, `47832` in Docker | Public host port used to build browser-console URL when `CSW_BROWSER_CONSOLE_URL` is not set |
 | `CSW_ENABLE_VNC` | `true` in Docker | Enable on-demand Xvfb, x11vnc and noVNC inside the Docker image |
 | `CSW_VNC_PORT` | `6080` in Docker | Container port for the noVNC browser console |
 | `CSW_VNC_SCREEN` | `1920x1080x24` in Docker | Virtual display size for Docker browser sessions |
@@ -226,6 +231,20 @@ Pause templates:
 - The Docker browser console exposes an interactive Claude browser session. Keep it bound to localhost or protect it behind a trusted reverse proxy.
 - Docker users should protect the persistent volume because it contains browser login state.
 - Auto-entering account passwords is intentionally not implemented in the MVP. Prefer interactive login.
+
+NAS example:
+
+```yaml
+ports:
+  - "40062:47831"  # CSW UI
+  - "40063:6080"   # noVNC/websockify
+environment:
+  CSW_HOST: 0.0.0.0
+  CSW_PORT: 47831
+  CSW_ENABLE_VNC: "true"
+  CSW_VNC_PORT: 6080
+  CSW_BROWSER_CONSOLE_PUBLIC_PORT: 40063
+```
 
 ## npm Launcher
 

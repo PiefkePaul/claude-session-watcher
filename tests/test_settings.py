@@ -34,11 +34,13 @@ def test_browser_console_url_env_is_loaded(monkeypatch):
     )
     monkeypatch.setenv("CSW_ENABLE_VNC", "true")
     monkeypatch.setenv("CSW_VNC_PORT", "47832")
+    monkeypatch.setenv("CSW_BROWSER_CONSOLE_PUBLIC_PORT", "47832")
     monkeypatch.setenv("CSW_AUTO_FINISH_LOGIN", "false")
 
     settings = Settings()
 
     assert settings.browser_console_url == "http://127.0.0.1:47832/vnc.html?autoconnect=true"
+    assert settings.browser_console_public_port == 47832
     assert settings.enable_vnc is True
     assert settings.vnc_port == 47832
     assert settings.auto_finish_login is False

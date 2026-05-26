@@ -18,7 +18,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     CSW_PORT=47831 \
     CSW_DATA_DIR=/data \
     CSW_CAMOUFOX_HEADLESS=false \
-    CSW_BROWSER_CONSOLE_URL="http://127.0.0.1:47832/vnc.html?autoconnect=true&resize=scale&path=websockify" \
+    CSW_BROWSER_CONSOLE_PUBLIC_PORT=47832 \
     CSW_ENABLE_VNC=true \
     CSW_VNC_PORT=6080 \
     CSW_VNC_SCREEN=1920x1080x24 \
