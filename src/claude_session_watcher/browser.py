@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import os
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+
+from .display import DisplayManager
 
 
 class BrowserError(Exception):
@@ -18,9 +22,17 @@ class BrowserSession:
 
 
 class CamoufoxManager:
-    def __init__(self, *, headless: str | bool = "virtual", os_name: str | None = None):
+    def __init__(
+        self,
+        *,
+        headless: str | bool = "virtual",
+        os_name: str | None = None,
+        display_manager: DisplayManager | None = None,
+    ):
         self.headless = headless
         self.os_name = os_name
+        self.display_manager = display_manager
+        self.display = display_manager.display if display_manager else os.environ.get("DISPLAY")
         self._sessions: dict[str, BrowserSession] = {}
         self._lock = asyncio.Lock()
 
@@ -30,9 +42,54 @@ class CamoufoxManager:
             self._sessions.clear()
         for session in sessions:
             await self._close_session(session)
+        await self._stop_display_if_idle()
 
     async def close_profile(self, profile_dir: Path) -> None:
         await self._discard_profile(profile_dir)
+        # Defensive: persistent context keys must match exactly. If callers passed
+        # a slightly different path representation, also discard by resolved path.
+        try:
+            resolved = profile_dir.resolve()
+        except Exception:
+            return
+        if resolved != profile_dir:
+            await self._discard_profile(resolved)
+        await self._kill_profile_processes(resolved)
+
+    async def _kill_profile_processes(self, profile_dir: Path) -> None:
+        # Best-effort safety net: if the Playwright/Camoufox teardown fails,
+        # ensure no stray browser processes keep running for this profile.
+        if os.name == "nt":
+            return
+        profile_str = str(profile_dir)
+        try:
+            subprocess.run(
+                # Match both camoufox-bin and child processes that keep the profile path.
+                # Note: patterns beginning with '-' must be preceded by '--' so pkill
+                # doesn't treat them as options.
+                ["pkill", "-f", "--", f"-profile {profile_str}"],
+                check=False,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except Exception:
+            return
+
+    def _default_viewport(self) -> dict[str, int]:
+        # If we have a VNC screen configured, match it to avoid awkward scaling.
+        screen = None
+        if self.display_manager:
+            screen = getattr(self.display_manager, "screen", None)
+        if isinstance(screen, str) and "x" in screen:
+            parts = screen.split("x")
+            try:
+                width = int(parts[0])
+                height = int(parts[1])
+                if width > 0 and height > 0:
+                    return {"width": width, "height": height}
+            except Exception:
+                pass
+        return {"width": 1280, "height": 900}
 
     async def context_for_profile(
         self,
@@ -41,7 +98,7 @@ class CamoufoxManager:
         headless: str | bool | None = None,
         reset: bool = False,
     ):
-        key = str(profile_dir)
+        key = str(profile_dir.resolve())
         desired_headless = self.headless if headless is None else headless
         async with self._lock:
             existing = self._sessions.get(key)
@@ -53,22 +110,43 @@ class CamoufoxManager:
                     return existing.context
                 else:
                     self._sessions.pop(key, None)
-            profile_dir.mkdir(parents=True, exist_ok=True)
+            resolved_dir = Path(key)
+            resolved_dir.mkdir(parents=True, exist_ok=True)
             try:
                 from camoufox.async_api import AsyncCamoufox
             except ImportError as exc:
                 raise BrowserError("camoufox is not installed") from exc
 
+            if desired_headless is False and self.display_manager:
+                await self.display_manager.ensure_started()
+
             kwargs: dict[str, Any] = {
                 "persistent_context": True,
-                "user_data_dir": str(profile_dir),
+                "user_data_dir": str(resolved_dir),
                 "headless": desired_headless,
                 "humanize": True,
+                "env": self._browser_env(),
+                # Make the visible browser window large enough for OAuth dialogs
+                # when running against a virtual display/VNC.
+                "viewport": self._default_viewport(),
             }
             if self.os_name:
                 kwargs["os"] = self.os_name
+            # Improve UX for OAuth providers (Google sign-in tends to open small popups).
+            # Prefer opening new windows as tabs.
+            kwargs["firefox_user_prefs"] = {
+                "browser.link.open_newwindow": 3,
+                "browser.link.open_newwindow.restriction": 0,
+            }
 
-            manager = AsyncCamoufox(**kwargs)
+            try:
+                manager = AsyncCamoufox(**kwargs)
+            except TypeError:
+                # Camoufox/Playwright bindings differ slightly across versions.
+                # Drop optional UX knobs if unsupported.
+                kwargs.pop("firefox_user_prefs", None)
+                kwargs.pop("viewport", None)
+                manager = AsyncCamoufox(**kwargs)
             context = await manager.__aenter__()
             self._sessions[key] = BrowserSession(
                 manager=manager,
@@ -76,6 +154,40 @@ class CamoufoxManager:
                 headless=desired_headless,
             )
             return context
+
+    def _browser_env(self) -> dict[str, str]:
+        if self.display_manager:
+            return self.display_manager.browser_env()
+        env = dict(os.environ)
+        if self.display:
+            env["DISPLAY"] = self.display
+        return env
+
+    async def is_profile_open(self, profile_dir: Path) -> bool:
+        try:
+            key = str(profile_dir.resolve())
+        except Exception:
+            key = str(profile_dir)
+        async with self._lock:
+            session = self._sessions.get(key)
+            if not session:
+                return False
+            if await self._session_alive(session):
+                return True
+            self._sessions.pop(key, None)
+        await self._stop_display_if_idle()
+        return False
+
+    async def has_open_sessions(self) -> bool:
+        async with self._lock:
+            sessions = list(self._sessions.items())
+        for key, session in sessions:
+            if await self._session_alive(session):
+                return True
+            async with self._lock:
+                self._sessions.pop(key, None)
+        await self._stop_display_if_idle()
+        return False
 
     async def _session_alive(self, session: BrowserSession) -> bool:
         try:
@@ -89,6 +201,10 @@ class CamoufoxManager:
 
     async def _close_session(self, session: BrowserSession) -> None:
         try:
+            await session.context.close()
+        except Exception:
+            pass
+        try:
             await session.manager.__aexit__(None, None, None)
         except Exception:
             pass
@@ -99,9 +215,12 @@ class CamoufoxManager:
         return "has been closed" in message or "target closed" in message
 
     async def open_login(self, profile_dir: Path) -> None:
-        context = await self.context_for_profile(profile_dir, headless=False, reset=True)
-        page = await context.new_page()
-        await page.goto("https://claude.ai/code", wait_until="domcontentloaded")
+        # Be idempotent: if a login browser is already open, reuse it instead of
+        # resetting (resetting while the wrapper is polling can be flaky).
+        context = await self.context_for_profile(profile_dir, headless=False, reset=False)
+        page = await self._get_or_open_page(context, "https://claude.ai/code")
+        if not page.url.startswith("https://claude.ai/"):
+            await page.goto("https://claude.ai/code", wait_until="domcontentloaded")
 
     async def session_key(self, profile_dir: Path) -> str:
         context = await self.context_for_profile(profile_dir)
@@ -235,11 +354,23 @@ class CamoufoxManager:
         await editor.press("Enter")
 
     async def _discard_profile(self, profile_dir: Path) -> None:
-        key = str(profile_dir)
+        try:
+            key = str(profile_dir.resolve())
+        except Exception:
+            key = str(profile_dir)
         async with self._lock:
             session = self._sessions.pop(key, None)
         if session:
             await self._close_session(session)
+        await self._stop_display_if_idle()
+
+    async def _stop_display_if_idle(self) -> None:
+        if not self.display_manager:
+            return
+        async with self._lock:
+            has_sessions = bool(self._sessions)
+        if not has_sessions:
+            await self.display_manager.stop()
 
     async def _get_or_open_page(self, context, remote_url: str):
         for page in context.pages:

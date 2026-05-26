@@ -6,13 +6,13 @@ import tempfile
 import time
 from pathlib import Path
 
-from .usage import ClaudeCookie, UsageError
+from .usage import ClaudeCookie, UsageLoginRequiredError
 
 
 def load_claude_cookies(profile_dir: Path) -> list[ClaudeCookie]:
     cookie_db = profile_dir / "cookies.sqlite"
     if not cookie_db.exists():
-        raise UsageError(f"No Firefox cookie store found at {cookie_db}")
+        raise UsageLoginRequiredError(f"No Firefox cookie store found at {cookie_db}")
 
     with tempfile.TemporaryDirectory(prefix="csw-cookies-") as tmp:
         tmp_path = Path(tmp)
@@ -54,5 +54,15 @@ def load_claude_cookies(profile_dir: Path) -> list[ClaudeCookie]:
         )
 
     if not cookies:
-        raise UsageError("No usable claude.ai cookies found in the browser profile")
+        raise UsageLoginRequiredError("No usable claude.ai cookies found in the browser profile")
     return cookies
+
+
+def has_session_key(profile_dir: Path) -> bool:
+    try:
+        return any(
+            cookie.name == "sessionKey" and cookie.value
+            for cookie in load_claude_cookies(profile_dir)
+        )
+    except UsageLoginRequiredError:
+        return False

@@ -15,6 +15,10 @@ class UsageAuthError(UsageError):
     pass
 
 
+class UsageLoginRequiredError(UsageError):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class ClaudeCookie:
     name: str

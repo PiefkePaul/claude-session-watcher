@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 import secrets
+import traceback
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -13,10 +15,12 @@ from fastapi.templating import Jinja2Templates
 
 from .browser import CamoufoxManager
 from .discovery import ClaudeSessionDiscoveryProvider, SessionDiscoveryService
+from .display import DisplayManager
 from .formatting import build_ui_watcher, format_timestamp
 from .insights import UsageInsights, build_usage_insights
 from .models import Account, AccountWatcher, ClaudeSession, Watcher, utc_now
 from .pause_templates import pause_template_options
+from .profile_cookies import has_session_key
 from .settings import Settings
 from .store import Store
 from .watcher import WatcherService
@@ -32,9 +36,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     settings.validate_web_security()
     settings.ensure_dirs()
     store = Store(settings.db_path)
+    display = DisplayManager(
+        enabled=settings.enable_vnc,
+        display=settings.vnc_display,
+        screen=settings.vnc_screen,
+        vnc_port=settings.vnc_port,
+        web_root=settings.vnc_web_root,
+        console_url=settings.browser_console_url,
+    )
     browser = CamoufoxManager(
         headless=settings.camoufox_headless,
         os_name=settings.camoufox_os,
+        display_manager=display,
     )
     service = WatcherService(store, browser, settings)
     discovery = SessionDiscoveryService(
@@ -47,12 +60,14 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         app.state.settings = settings
         app.state.store = store
         app.state.browser = browser
+        app.state.display = display
         app.state.service = service
         app.state.discovery = discovery
         service.start()
         yield
         await service.stop()
         await browser.close()
+        await display.stop()
 
     app = FastAPI(title="Claude Session Watcher", lifespan=lifespan)
     templates = Jinja2Templates(directory=str(settings_path("templates")))
@@ -73,7 +88,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     async def index(request: Request):
         accounts = store.list_accounts()
-        account_rows = [_account_row(store, account) for account in accounts]
+        account_rows = [
+            await _account_row(store, browser, display, account)
+            for account in accounts
+        ]
         events = store.list_account_events(limit=50)
         return templates.TemplateResponse(
             request,
@@ -199,14 +217,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.post("/accounts/{account_id}/login")
     async def open_login(account_id: int):
-        account = store.get_account(account_id)
-        try:
-            await browser.open_login(Path(account.profile_dir))
-            store.update_account_status(account_id, "login-opened")
-        except Exception as exc:  # noqa: BLE001
-            store.update_account_status(account_id, "error", str(exc))
-            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        await _open_account_login(store, browser, display, account_id)
         return RedirectResponse("/", status_code=303)
+
+    @app.post("/accounts/{account_id}/finish-login")
+    async def finish_login(account_id: int):
+        await _finish_account_login(store, browser, account_id)
+        return RedirectResponse("/", status_code=303)
+
+    @app.post("/accounts/{account_id}/close-browser")
+    async def close_account_browser(account_id: int):
+        await _close_account_browser(store, browser, account_id)
+        return RedirectResponse("/", status_code=303)
+
+    @app.get("/browser-console", response_class=HTMLResponse)
+    async def browser_console(request: Request, account_id: int, wait: bool = False):
+        account = store.get_account(account_id)
+        return templates.TemplateResponse(
+            request,
+            "browser_console.html",
+            {
+                "account": account,
+                "wait": wait,
+                "auto_finish_login": settings.auto_finish_login,
+            },
+        )
 
     @app.post("/watchers")
     async def create_watcher(
@@ -326,6 +361,26 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def api_account_sessions(account_id: int):
         return [_api_session(session) for session in store.list_sessions(account_id)]
 
+    @app.get("/api/accounts/{account_id}/browser-state")
+    async def api_account_browser_state(account_id: int):
+        account = store.get_account(account_id)
+        return await _browser_state(browser, display, account)
+
+    @app.post("/api/accounts/{account_id}/login")
+    async def api_open_login(account_id: int):
+        account = await _open_account_login(store, browser, display, account_id)
+        return await _browser_state(browser, display, account)
+
+    @app.post("/api/accounts/{account_id}/finish-login")
+    async def api_finish_login(account_id: int):
+        account = await _finish_account_login(store, browser, account_id)
+        return await _browser_state(browser, display, account)
+
+    @app.post("/api/accounts/{account_id}/close-browser")
+    async def api_close_browser(account_id: int):
+        account = await _close_account_browser(store, browser, account_id)
+        return await _browser_state(browser, display, account)
+
     @app.get("/api/account-watchers/{account_watcher_id}/usage-history")
     async def api_usage_history(account_watcher_id: int, limit: int = 200):
         return [
@@ -409,24 +464,124 @@ def _valid_auth_header(authorization: str, token: str) -> bool:
     return False
 
 
-def _account_row(store: Store, account: Account) -> dict[str, object]:
+async def _account_row(
+    store: Store,
+    browser: CamoufoxManager,
+    display: DisplayManager,
+    account: Account,
+) -> dict[str, object]:
     if account.id is None:
         raise ValueError("Account must be stored before rendering")
     account_watcher = store.ensure_account_watcher(account.id)
     sessions = store.list_sessions(account.id)
     samples = store.list_usage_samples(account_watcher.id)
     insights = build_usage_insights(account_watcher, samples)
+    browser_state = await _browser_state(browser, display, account)
     return {
         "account": account,
         "watcher": account_watcher,
         "ui": build_ui_watcher(account_watcher),
         "insights": insights,
         "insight_display": _insight_display(insights),
+        "browser": browser_state,
         "sessions": sessions,
         "session_count": len(sessions),
         "watched_count": sum(1 for session in sessions if session.watch_enabled),
         "controllable_count": sum(1 for session in sessions if session.control_supported),
     }
+
+
+async def _browser_state(
+    browser: CamoufoxManager,
+    display: DisplayManager,
+    account: Account,
+) -> dict[str, object]:
+    profile_dir = Path(account.profile_dir)
+    try:
+        browser_open = await browser.is_profile_open(profile_dir)
+    except Exception as exc:  # noqa: BLE001 - best-effort status endpoint
+        browser_open = False
+        store_error = str(exc)
+    else:
+        store_error = None
+    display_state = display.state()
+    login_detected = has_session_key(profile_dir)
+    return {
+        "account_id": account.id,
+        "browser_open": browser_open,
+        "display_enabled": display_state.enabled,
+        "display_running": display_state.running,
+        "vnc_ready": display_state.ready,
+        "console_url": display_state.console_url if browser_open else None,
+        "login_detected": login_detected,
+        "status": account.status,
+        "last_error": account.last_error or store_error,
+    }
+
+
+async def _open_account_login(
+    store: Store,
+    browser: CamoufoxManager,
+    display: DisplayManager,
+    account_id: int,
+) -> Account:
+    account = store.get_account(account_id)
+    account_watcher = store.ensure_account_watcher(account_id)
+    try:
+        profile_dir = Path(account.profile_dir)
+        try:
+            await browser.open_login(profile_dir)
+        except Exception:
+            # Rarely the first headful launch can fail due to transient display/browser startup
+            # issues. A single retry is cheap and makes "Open login" much less flaky.
+            await browser.close_profile(profile_dir)
+            await display.stop()
+            await browser.open_login(profile_dir)
+        store.update_account_status(account_id, "login-opened")
+        store.add_account_event(account_watcher.id, "info", "Login browser opened")
+        return store.get_account(account_id)
+    except Exception as exc:  # noqa: BLE001
+        await display.stop()
+        logging.getLogger("claude_session_watcher").exception(
+            "Open login failed for account_id=%s", account_id
+        )
+        traceback.print_exc()
+        store.update_account_status(account_id, "error", str(exc))
+        store.add_account_event(account_watcher.id, "error", f"Login browser failed: {exc}")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+async def _finish_account_login(
+    store: Store,
+    browser: CamoufoxManager,
+    account_id: int,
+) -> Account:
+    account = store.get_account(account_id)
+    account_watcher = store.ensure_account_watcher(account_id)
+    profile_dir = Path(account.profile_dir)
+    try:
+        if not has_session_key(profile_dir):
+            await browser.session_key(profile_dir)
+        await browser.close_profile(profile_dir)
+        store.update_account_status(account_id, "logged-in")
+        store.add_account_event(account_watcher.id, "info", "Login finished")
+    except Exception as exc:  # noqa: BLE001
+        store.update_account_status(account_id, "login-incomplete", str(exc))
+        store.add_account_event(account_watcher.id, "warning", f"Login check failed: {exc}")
+    return store.get_account(account_id)
+
+
+async def _close_account_browser(
+    store: Store,
+    browser: CamoufoxManager,
+    account_id: int,
+) -> Account:
+    account = store.get_account(account_id)
+    account_watcher = store.ensure_account_watcher(account_id)
+    await browser.close_profile(Path(account.profile_dir))
+    store.update_account_status(account_id, "browser-closed")
+    store.add_account_event(account_watcher.id, "info", "Browser closed")
+    return store.get_account(account_id)
 
 
 def _api_account(store: Store, account: Account) -> dict[str, object]:

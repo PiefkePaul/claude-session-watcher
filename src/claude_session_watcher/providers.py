@@ -8,7 +8,13 @@ from typing import Protocol
 from .browser import CamoufoxManager
 from .models import Account
 from .profile_cookies import load_claude_cookies
-from .usage import ClaudeUsageClient, UsageAuthError, UsageError, UsageSnapshot
+from .usage import (
+    ClaudeUsageClient,
+    UsageAuthError,
+    UsageError,
+    UsageLoginRequiredError,
+    UsageSnapshot,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -27,6 +33,10 @@ class CamoufoxCookiesHttpUsageProvider:
 
     async def fetch(self, account: Account) -> UsageFetchResult:
         cookies = load_claude_cookies(Path(account.profile_dir))
+        if not any(cookie.name == "sessionKey" and cookie.value for cookie in cookies):
+            raise UsageLoginRequiredError(
+                "No sessionKey cookie found in the browser profile. Open login and sign in first."
+            )
         client = ClaudeUsageClient(cookies=cookies)
         return UsageFetchResult(snapshot=await client.fetch(), source=self.source)
 
@@ -59,5 +69,12 @@ class FallbackUsageProvider:
     async def fetch(self, account: Account) -> UsageFetchResult:
         try:
             return await self.primary.fetch(account)
-        except (UsageAuthError, UsageError, OSError, sqlite3.Error):
+        except UsageLoginRequiredError:
+            raise
+        except UsageAuthError:
+            # Auth/session problems cannot be fixed by falling back to a browser-driven
+            # provider without user interaction. Falling back here can also interfere
+            # with an in-progress login flow by opening/closing the same profile.
+            raise
+        except (UsageError, OSError, sqlite3.Error):
             return await self.fallback.fetch(account)

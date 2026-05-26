@@ -2,8 +2,8 @@ import sqlite3
 
 import pytest
 
-from claude_session_watcher.profile_cookies import load_claude_cookies
-from claude_session_watcher.usage import UsageError
+from claude_session_watcher.profile_cookies import has_session_key, load_claude_cookies
+from claude_session_watcher.usage import UsageLoginRequiredError
 
 
 def _create_cookie_db(path):
@@ -40,5 +40,12 @@ def test_load_claude_cookies_from_firefox_profile(tmp_path):
 
 
 def test_load_claude_cookies_errors_when_missing(tmp_path):
-    with pytest.raises(UsageError):
+    with pytest.raises(UsageLoginRequiredError):
         load_claude_cookies(tmp_path)
+
+
+def test_has_session_key_reads_profile(tmp_path):
+    _create_cookie_db(tmp_path / "cookies.sqlite")
+
+    assert has_session_key(tmp_path) is True
+    assert has_session_key(tmp_path / "missing") is False
