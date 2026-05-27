@@ -1269,7 +1269,8 @@ class CamoufoxManager:
                     // unauthenticated users.  URL-based detection causes false logged_in for
                     // brand-new accounts and is not needed — the user-menu selector is the
                     // reliable indicator.
-                    if (document.querySelector('[data-testid="user-menu-button"]')) return 'logged_in';
+                    if (document.querySelector('[data-testid="user-menu-button"]'))
+                        return 'logged_in';
                     // New account onboarding
                     const text = (document.body ? document.body.innerText : '').toLowerCase();
                     if (text.includes('how do you plan') || text.includes('tell us about yourself')

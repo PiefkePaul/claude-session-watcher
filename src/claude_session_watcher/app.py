@@ -559,7 +559,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             body = await request.json()
         except Exception:
-            raise HTTPException(status_code=400, detail="JSON body required")
+            raise HTTPException(status_code=400, detail="JSON body required") from None
         email = str(body.get("email", "")).strip()
         if not email:
             raise HTTPException(status_code=400, detail="email required")
@@ -589,7 +589,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         try:
             body = await request.json()
         except Exception:
-            raise HTTPException(status_code=400, detail="JSON body required")
+            raise HTTPException(status_code=400, detail="JSON body required") from None
         code = str(body.get("code", "")).strip()
         if not code:
             raise HTTPException(status_code=400, detail="code required")
