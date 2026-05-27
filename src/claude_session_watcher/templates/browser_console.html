@@ -1,147 +1,826 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Browser Console - {{ account.name }}</title>
-    <link rel="stylesheet" href="/static/styles.css" />
-  </head>
-  <body class="console-body">
-    <header class="topbar console-topbar">
-      <div>
-        <h1>{{ account.name }}</h1>
-        <p id="console-status">Starting browser console...</p>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Login — {{ account.name }}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/static/styles.css?v=9"/>
+  <script>document.documentElement.setAttribute('data-theme',localStorage.getItem('csw-theme')||'dark');</script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    .proxy-body { display: flex; flex-direction: column; height: 100vh; overflow: hidden;
+                  background: var(--bg); }
+
+    /* Header */
+    .proxy-header {
+      flex: 0 0 auto; display: flex; align-items: center; gap: 10px;
+      padding: 8px 16px;
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      flex-wrap: wrap; z-index: 10;
+    }
+    .proxy-title { font-family: var(--font); font-weight: 700; font-size: 0.9rem;
+                   color: var(--cyan); white-space: nowrap; }
+    .proxy-status { font-family: var(--mono); font-size: 0.68rem; color: var(--text-dim);
+                    flex: 1 1 auto; min-width: 0; overflow: hidden;
+                    text-overflow: ellipsis; white-space: nowrap; }
+    .proxy-actions { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+
+    /* Login form view */
+    #login-view {
+      flex: 1 1 auto; display: flex; align-items: center; justify-content: center;
+      padding: 24px 16px; overflow-y: auto;
+    }
+    .login-card {
+      width: 100%; max-width: 380px;
+      background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+      padding: 36px 32px 28px;
+      display: flex; flex-direction: column; gap: 20px;
+    }
+
+    /* Card head */
+    .login-head { text-align: center; display: flex; flex-direction: column; gap: 10px; }
+    .login-icon {
+      width: 46px; height: 46px; margin: 0 auto; border-radius: 13px;
+      background: rgba(0,200,255,0.08); border: 1px solid rgba(0,200,255,0.25);
+      display: flex; align-items: center; justify-content: center; color: var(--cyan);
+    }
+    .login-title { font-family: var(--font); font-size: 1.2rem; font-weight: 700; color: var(--text); }
+    .login-subtitle { font-family: var(--mono); font-size: 0.7rem; color: var(--text-dim); }
+    .login-acct { color: var(--cyan); font-weight: 600; }
+
+    /* Form fields */
+    .login-fields { display: flex; flex-direction: column; gap: 12px; }
+    .login-field { display: flex; flex-direction: column; gap: 5px; }
+    .login-label { font-family: var(--mono); font-size: 0.68rem; color: var(--text-dim); }
+    .login-input {
+      width: 100%; padding: 9px 12px;
+      background: var(--surface-2); border: 1px solid var(--border); border-radius: 7px;
+      font-family: var(--mono); font-size: 0.8rem; color: var(--text);
+      outline: none; transition: border-color 0.15s;
+    }
+    .login-input:focus { border-color: var(--cyan); }
+    .login-input::placeholder { color: var(--text-dim); opacity: 0.6; }
+
+    /* OTP code input */
+    .otp-input {
+      text-align: center; letter-spacing: 0.45em;
+      font-size: 1.5rem !important; font-weight: 700; padding: 11px 12px !important;
+      color: var(--cyan) !important;
+    }
+    .otp-input:focus {
+      border-color: var(--cyan); box-shadow: 0 0 0 2px rgba(0,200,255,0.15);
+    }
+
+    /* OTP hint box */
+    .otp-hint {
+      display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px;
+      background: rgba(0,200,255,0.05); border: 1px solid rgba(0,200,255,0.18);
+      border-radius: 9px; font-family: var(--mono); font-size: 0.68rem;
+      line-height: 1.55; color: var(--text-dim);
+    }
+    .otp-hint-icon { flex-shrink: 0; margin-top: 1px; color: var(--cyan); opacity: 0.8; }
+    .otp-hint strong { color: var(--text); font-weight: 600; }
+
+    /* Back link */
+    .btn-link {
+      background: none; border: none; cursor: pointer; padding: 0;
+      font-family: var(--mono); font-size: 0.65rem; color: var(--text-dim);
+      text-decoration: underline; text-underline-offset: 2px;
+      transition: color 0.12s; text-align: left;
+    }
+    .btn-link:hover { color: var(--text); }
+
+    /* Submit button */
+    .btn-email-submit {
+      width: 100%; padding: 10px; border-radius: 7px; border: none; cursor: pointer;
+      background: var(--cyan); font-family: var(--font); font-size: 0.875rem;
+      font-weight: 600; color: #06090f;
+      transition: opacity 0.15s, transform 0.1s;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+    }
+    .btn-email-submit:hover { opacity: 0.88; }
+    .btn-email-submit:active { transform: scale(0.98); }
+    .btn-email-submit:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+    .btn-spin {
+      width: 13px; height: 13px; border-radius: 50%; flex-shrink: 0;
+      border: 2px solid rgba(6,9,15,0.3); border-top-color: #06090f;
+      animation: spin 0.7s linear infinite;
+    }
+
+    /* Form status */
+    .login-form-status { min-height: 1.3em; font-family: var(--mono); font-size: 0.7rem;
+                         text-align: center; }
+    .login-form-status.err  { color: var(--red); }
+    .login-form-status.ok   { color: var(--green); }
+    .login-form-status.info { color: var(--text-dim); }
+
+    /* Show browser link */
+    .login-show-browser { text-align: center; }
+    .btn-show-browser {
+      background: none; border: none; cursor: pointer; padding: 4px 8px;
+      font-family: var(--mono); font-size: 0.65rem; color: var(--text-dim);
+      border-radius: 4px; text-decoration: underline; text-underline-offset: 2px;
+      transition: color 0.12s;
+    }
+    .btn-show-browser:hover { color: var(--text); }
+
+    /* Success / error card */
+    .result-card {
+      width: 100%; max-width: 380px;
+      background: var(--surface); border-radius: 14px;
+      padding: 52px 32px; text-align: center;
+      display: flex; flex-direction: column; gap: 12px; align-items: center;
+    }
+    .result-icon {
+      width: 54px; height: 54px; border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.5rem;
+    }
+    .result-title { font-family: var(--font); font-weight: 700; font-size: 1.15rem; }
+    .result-sub { font-family: var(--mono); font-size: 0.72rem; color: var(--text-dim); }
+
+    /* Canvas view */
+    #canvas-view {
+      flex: 1 1 auto; display: flex; flex-direction: column; overflow: hidden;
+      background: #000;
+    }
+    .tab-bar {
+      background: var(--surface-2); border-bottom: 1px solid var(--border);
+      padding: 4px 10px; display: flex; gap: 4px; align-items: center;
+      overflow-x: auto; flex-shrink: 0;
+    }
+    .tab-btn {
+      font-family: var(--mono); font-size: 0.63rem; padding: 3px 10px;
+      border-radius: 4px; border: 1px solid var(--border); background: transparent;
+      color: var(--text-dim); cursor: pointer; white-space: nowrap;
+      max-width: 200px; overflow: hidden; text-overflow: ellipsis;
+    }
+    .tab-btn:hover { background: var(--surface-3); color: var(--text); }
+    .tab-btn.tab-active { background: var(--cyan-bg); border-color: var(--cyan); color: var(--cyan); }
+
+    .screen-wrap {
+      flex: 1 1 auto; position: relative; overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .screen-placeholder {
+      position: absolute; inset: 0; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; gap: 14px;
+      background: var(--bg); color: var(--text-dim);
+      font-family: var(--mono); font-size: 0.82rem;
+    }
+    .screen-spinner {
+      width: 28px; height: 28px; border-radius: 50%;
+      border: 2px solid var(--border); border-top-color: var(--cyan);
+      animation: spin 0.8s linear infinite;
+    }
+    #screen { cursor: crosshair; user-select: none; display: block;
+              max-width: 100%; max-height: 100%; }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); }
+                        to   { opacity: 1; transform: translateY(0); } }
+    .fade-in { animation: fadeIn 0.22s ease; }
+  </style>
+</head>
+<body class="proxy-body">
+
+  <header class="proxy-header">
+    <span class="proxy-title">{{ account.name }}</span>
+    <span class="proxy-status" id="proxy-status">Initializing…</span>
+    <div class="proxy-actions">
+      <button type="button" class="btn btn-ghost btn-xs" id="btn-toggle-view" hidden>
+        Show Browser
+      </button>
+      <button type="button" class="btn btn-accent btn-xs" id="btn-finish" hidden>
+        Finish Login
+      </button>
+      <button type="button" class="btn btn-danger btn-xs" id="btn-close-browser" hidden>
+        Close Browser
+      </button>
+    </div>
+  </header>
+
+  <!-- Login form (default view) -->
+  <div id="login-view">
+    <div class="login-card fade-in">
+
+      <div class="login-head">
+        <div class="login-icon">
+          <svg width="22" height="22" viewBox="0 0 22 22" fill="none">
+            <circle cx="11" cy="11" r="7.5" stroke="currentColor" stroke-width="1.4"/>
+            <circle cx="11" cy="11" r="2.5" fill="currentColor"/>
+            <line x1="11" y1="1"    x2="11" y2="4.5"  stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            <line x1="11" y1="17.5" x2="11" y2="21"   stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            <line x1="1"  y1="11"   x2="4.5" y2="11"  stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+            <line x1="17.5" y1="11" x2="21" y2="11"   stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+          </svg>
+        </div>
+        <h2 class="login-title">Sign in to Claude</h2>
+        <p class="login-subtitle">Account: <span class="login-acct">{{ account.name }}</span></p>
       </div>
-      <div class="actions">
-        <button type="button" class="secondary" id="start-google-login">Continue with Google</button>
-        <button type="button" class="secondary" id="finish-login">Finish login</button>
-        <button type="button" class="secondary" id="close-browser">Close browser</button>
+
+      <form class="login-fields" id="email-form" onsubmit="handleEmailSubmit(); return false;">
+
+        <!-- Step 1: Email -->
+        <div class="login-field" id="email-wrap">
+          <label class="login-label" for="login-email">Email address</label>
+          <input class="login-input" type="email" id="login-email"
+                 placeholder="you@example.com" autocomplete="email"
+                 autocorrect="off" autocapitalize="none" spellcheck="false"/>
+        </div>
+
+        <!-- Step 2: OTP (hidden until code form is ready) -->
+        <div id="otp-wrap" hidden>
+          <div class="otp-hint" style="margin-bottom:12px;">
+            <span class="otp-hint-icon">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2"
+                   stroke-linecap="round" stroke-linejoin="round">
+                <rect x="2" y="4" width="20" height="16" rx="2"/>
+                <polyline points="2 4 12 13 22 4"/>
+              </svg>
+            </span>
+            <span>Check your email. <strong>Open the link</strong> to reveal the 6-digit code, then enter it below.</span>
+          </div>
+          <div class="login-field">
+            <label class="login-label" for="login-code">Verification code</label>
+            <input class="login-input otp-input" type="text" id="login-code"
+                   placeholder="000000" maxlength="6"
+                   inputmode="numeric" pattern="[0-9]{6}"
+                   autocomplete="one-time-code" spellcheck="false"/>
+          </div>
+          <button type="button" class="btn-link" id="btn-back-email" style="margin-top:6px;">
+            ← Use a different email
+          </button>
+        </div>
+
+        <button class="btn-email-submit" type="submit" id="btn-email-submit">
+          Continue →
+        </button>
+      </form>
+
+      <div class="login-form-status info" id="login-form-status"></div>
+
+      <div class="login-show-browser">
+        <button class="btn-show-browser" id="btn-show-browser-small" type="button">
+          Show browser window ↗
+        </button>
       </div>
-    </header>
+    </div>
+  </div>
 
-    <main class="console-layout">
-      <div class="console-placeholder" id="console-placeholder">
-        Waiting for the browser window...
+  <!-- Canvas / browser stream view -->
+  <div id="canvas-view" hidden>
+    <div class="tab-bar" id="tab-bar" hidden></div>
+    <div class="screen-wrap">
+      <div class="screen-placeholder" id="screen-placeholder">
+        <div class="screen-spinner"></div>
+        <span>Connecting to browser…</span>
       </div>
-      <iframe
-        id="console-frame"
-        class="console-frame"
-        title="Browser console"
-        allow="clipboard-read; clipboard-write"
-      ></iframe>
-    </main>
+      <canvas id="screen" hidden></canvas>
+    </div>
+  </div>
 
-    <script>
-      const accountId = {{ account.id }};
-      const autoFinishLogin = {{ "true" if auto_finish_login else "false" }};
-      const autoStartGoogleLogin = {{ "true" if auto_start_google_login else "false" }};
-      const waitForBrowser = {{ "true" if wait else "false" }};
-      const statusEl = document.getElementById("console-status");
-      const frame = document.getElementById("console-frame");
-      const placeholder = document.getElementById("console-placeholder");
-      const finishButton = document.getElementById("finish-login");
-      const googleButton = document.getElementById("start-google-login");
-      const closeButton = document.getElementById("close-browser");
-      let loadedConsoleUrl = null;
-      let finishInFlight = false;
-      let googleKickoffAttempted = false;
+<script>
+  // ── Config (server-injected) ──────────────────────────────
+  const accountId       = {{ account.id }};
+  const autoFinishLogin = {{ "true" if auto_finish_login else "false" }};
+  const waitForBrowser  = {{ "true" if wait else "false" }};
+  const accountName     = {{ account.name | tojson }};
 
-      function setStatus(message) {
-        statusEl.textContent = message;
+  // ── DOM refs ──────────────────────────────────────────────
+  const statusEl        = document.getElementById('proxy-status');
+  const loginView       = document.getElementById('login-view');
+  const canvasView      = document.getElementById('canvas-view');
+  const canvasEl        = document.getElementById('screen');
+  const ctx             = canvasEl.getContext('2d');
+  const placeholder     = document.getElementById('screen-placeholder');
+  const tabBar          = document.getElementById('tab-bar');
+  const formStatusEl    = document.getElementById('login-form-status');
+  const emailWrap       = document.getElementById('email-wrap');
+  const otpWrap         = document.getElementById('otp-wrap');
+  const emailInput      = document.getElementById('login-email');
+  const codeInput       = document.getElementById('login-code');
+  const submitBtn       = document.getElementById('btn-email-submit');
+  const btnToggleView   = document.getElementById('btn-toggle-view');
+  const btnFinish       = document.getElementById('btn-finish');
+  const btnCloseBrowser = document.getElementById('btn-close-browser');
+
+  // ── State ─────────────────────────────────────────────────
+  let mode              = 'form';    // 'form' | 'canvas' | 'done'
+  let emailStep         = 'email';   // 'email' | 'otp'
+  let currentPageIdx    = -1;
+  let browserOpen       = false;
+  let loginDetected     = false;
+  let finishInFlight    = false;
+  let emailLoginFlight  = false;   // prevents concurrent start-email-login calls
+  let ws                = null;
+  let wsRetryTimer      = null;
+
+  // ── Helpers ───────────────────────────────────────────────
+  function setStatus(msg)           { statusEl.textContent = msg; }
+  function setFormStatus(msg, cls)  {
+    formStatusEl.textContent = msg;
+    formStatusEl.className = `login-form-status ${cls || 'info'}`;
+  }
+  function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+                    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function setSubmitBusy(busy, label) {
+    submitBtn.disabled = busy;
+    if (busy) {
+      submitBtn.innerHTML = `<span class="btn-spin"></span><span>${escHtml(label||'Please wait…')}</span>`;
+    } else {
+      submitBtn.textContent = emailStep === 'otp' ? 'Verify Code' : 'Continue →';
+    }
+  }
+
+  // ── API ───────────────────────────────────────────────────
+  async function apiGet(path) {
+    const r = await fetch(`/api/accounts/${accountId}/${path}`);
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+  async function apiPost(path) {
+    const r = await fetch(`/api/accounts/${accountId}/${path}`, {method:'POST'});
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+  async function apiPostJson(path, body) {
+    const r = await fetch(`/api/accounts/${accountId}/${path}`, {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(await r.text());
+    return r.json();
+  }
+
+  // ── Browser open state ────────────────────────────────────
+  function setBrowserOpen(open) {
+    browserOpen = open;
+    btnFinish.hidden       = !open;
+    btnCloseBrowser.hidden = !open;
+    btnToggleView.hidden   = !open;
+  }
+
+  // ── View transitions ──────────────────────────────────────
+  function showForm() {
+    if (mode === 'done') return;
+    mode = 'form';
+    loginView.removeAttribute('hidden');
+    canvasView.setAttribute('hidden', '');
+    btnToggleView.textContent = 'Show Browser';
+  }
+
+  function showCanvas() {
+    if (mode === 'done') return;
+    mode = 'canvas';
+    canvasView.removeAttribute('hidden');
+    loginView.setAttribute('hidden', '');
+    btnToggleView.textContent = '← Back to Form';
+    connectWS();
+  }
+
+  function showSuccess() {
+    if (mode === 'done') return;
+    mode = 'done';
+    if (ws) ws.close();
+    canvasView.setAttribute('hidden', '');
+    loginView.removeAttribute('hidden');
+    loginView.innerHTML = `
+      <div class="result-card fade-in" style="border:1px solid rgba(31,232,124,.35);">
+        <div class="result-icon" style="background:rgba(31,232,124,.1);border:2px solid var(--green);color:var(--green);">✓</div>
+        <p class="result-title" style="color:var(--green);">Signed in successfully</p>
+        <p class="result-sub">${escHtml(accountName)}</p>
+        <p class="result-sub" style="margin-top:4px;opacity:.6">Finishing up…</p>
+      </div>`;
+    btnToggleView.hidden   = true;
+    btnFinish.hidden       = true;
+    btnCloseBrowser.hidden = true;
+  }
+
+  async function showNewAccountError() {
+    if (mode === 'done') return;
+    mode = 'done';
+    if (ws) ws.close();
+    canvasView.setAttribute('hidden', '');
+    loginView.removeAttribute('hidden');
+    try { await apiPost('close-browser'); } catch (_) {}
+    loginView.innerHTML = `
+      <div class="result-card fade-in" style="border:1px solid rgba(255,61,90,.35);">
+        <div class="result-icon" style="background:rgba(255,61,90,.1);border:2px solid var(--red);color:var(--red);">✕</div>
+        <p class="result-title" style="color:var(--red);">Account not usable</p>
+        <p class="result-sub">This email has no Claude account<br>or no active Pro subscription.</p>
+        <p class="result-sub" style="margin-top:8px;opacity:.5;font-size:.63rem;">
+          Only Pro accounts can be monitored.<br>
+          The browser has been closed automatically.
+        </p>
+      </div>`;
+    btnToggleView.hidden   = true;
+    btnFinish.hidden       = true;
+    btnCloseBrowser.hidden = true;
+    setStatus('No subscription — account cannot be used.');
+  }
+
+  // ── OTP step transitions ──────────────────────────────────
+  function enterOtpStep() {
+    emailStep = 'otp';
+    emailWrap.setAttribute('hidden', '');
+    otpWrap.removeAttribute('hidden');
+    submitBtn.textContent = 'Verify Code';
+    submitBtn.disabled = false;
+    setTimeout(() => { codeInput.focus(); codeInput.select(); }, 60);
+  }
+
+  function enterEmailStep() {
+    emailStep = 'email';
+    otpWrap.setAttribute('hidden', '');
+    emailWrap.removeAttribute('hidden');
+    codeInput.value = '';
+    submitBtn.textContent = 'Continue →';
+    submitBtn.disabled = false;
+    setFormStatus('', 'info');
+    setTimeout(() => emailInput.focus(), 50);
+  }
+
+  // ── WebSocket stream ──────────────────────────────────────
+  function connectWS() {
+    if (ws && ws.readyState < 2) return;
+    clearTimeout(wsRetryTimer);
+    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    ws = new WebSocket(`${proto}//${location.host}/ws/accounts/${accountId}/browser-stream`);
+    ws.binaryType = 'blob';
+    ws.onopen    = () => setStatus(browserOpen ? 'Browser connected.' : 'Waiting for browser…');
+    ws.onmessage = e => {
+      if (e.data instanceof Blob) drawFrame(e.data);
+      else { try { handleMeta(JSON.parse(e.data)); } catch (_) {} }
+    };
+    ws.onclose = () => {
+      if (mode === 'done') return;
+      wsRetryTimer = setTimeout(connectWS, 2000);
+    };
+    ws.onerror = () => {};
+  }
+
+  function drawFrame(blob) {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      canvasEl.width  = img.naturalWidth;
+      canvasEl.height = img.naturalHeight;
+      const wrap  = canvasEl.parentElement;
+      const scale = Math.min(wrap.clientWidth  / img.naturalWidth,
+                             wrap.clientHeight / img.naturalHeight);
+      canvasEl.style.width  = Math.round(img.naturalWidth  * scale) + 'px';
+      canvasEl.style.height = Math.round(img.naturalHeight * scale) + 'px';
+      ctx.drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      if (canvasEl.hasAttribute('hidden')) {
+        canvasEl.removeAttribute('hidden');
+        placeholder.setAttribute('hidden', '');
       }
+      if (!browserOpen) setBrowserOpen(true);
+    };
+    img.onerror = () => URL.revokeObjectURL(url);
+    img.src = url;
+  }
 
-      async function postAction(action) {
-        const response = await fetch(`/api/accounts/${accountId}/${action}`, { method: "POST" });
-        if (!response.ok) throw new Error(await response.text());
-        return response.json();
+  function handleMeta(info) {
+    if (info.pages !== undefined) updateTabBar(info.pages);
+    if (info.login_detected && !loginDetected) {
+      loginDetected = true;
+      handleLoginDetected();
+    }
+  }
+
+  // ── Canvas input forwarding ───────────────────────────────
+  function sendWsInput(ev) {
+    if (ws && ws.readyState === WebSocket.OPEN)
+      ws.send(JSON.stringify({ t: 'input', d: ev, p: currentPageIdx }));
+  }
+
+  canvasEl.addEventListener('click', e => {
+    const r = canvasEl.getBoundingClientRect();
+    sendWsInput({ type:'click',
+      x: Math.round((e.clientX - r.left) * canvasEl.width  / r.width),
+      y: Math.round((e.clientY - r.top)  * canvasEl.height / r.height),
+    });
+  });
+  canvasEl.addEventListener('dblclick', e => {
+    const r = canvasEl.getBoundingClientRect();
+    sendWsInput({ type:'dblclick',
+      x: Math.round((e.clientX - r.left) * canvasEl.width  / r.width),
+      y: Math.round((e.clientY - r.top)  * canvasEl.height / r.height),
+    });
+  });
+  canvasEl.addEventListener('wheel', e => {
+    e.preventDefault();
+    sendWsInput({ type:'scroll', dx: e.deltaX, dy: e.deltaY });
+  }, { passive: false });
+
+  let screenHovered = false;
+  canvasEl.addEventListener('mouseenter', () => { screenHovered = true; });
+  canvasEl.addEventListener('mouseleave', () => { screenHovered = false; });
+
+  const PRESS_KEYS = new Set(['Enter','Tab','Backspace','Delete','Escape',
+    'ArrowUp','ArrowDown','ArrowLeft','ArrowRight',
+    'Home','End','PageUp','PageDown',
+    'F1','F2','F3','F4','F5','F6','F7','F8','F9','F10','F11','F12']);
+
+  document.addEventListener('keydown', e => {
+    if (mode !== 'canvas' || !screenHovered) return;
+    const focused = document.activeElement;
+    if (focused && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA')) return;
+    e.preventDefault();
+    const key = e.key;
+    if (PRESS_KEYS.has(key) || e.ctrlKey || e.metaKey || e.altKey) {
+      let combo = '';
+      if (e.ctrlKey)  combo += 'Control+';
+      if (e.metaKey)  combo += 'Meta+';
+      if (e.altKey)   combo += 'Alt+';
+      if (e.shiftKey && PRESS_KEYS.has(key)) combo += 'Shift+';
+      sendWsInput({ type:'key', key: combo + key });
+    } else if (key.length === 1) {
+      sendWsInput({ type:'type', text: key });
+    }
+  });
+
+  // ── Tab bar ───────────────────────────────────────────────
+  function updateTabBar(pages) {
+    if (!pages || pages.length <= 1) { tabBar.setAttribute('hidden', ''); return; }
+    tabBar.removeAttribute('hidden');
+    if (currentPageIdx < 0 || currentPageIdx >= pages.length)
+      currentPageIdx = pages.length - 1;
+    tabBar.innerHTML = pages.map(p => {
+      const label  = (p.title || p.url || `Page ${p.index + 1}`).slice(0, 36);
+      const active = p.index === currentPageIdx ? 'tab-active' : '';
+      return `<button class="tab-btn ${active}" data-idx="${p.index}" title="${escHtml(p.url)}">${escHtml(label)}</button>`;
+    }).join('');
+    tabBar.querySelectorAll('.tab-btn').forEach(btn =>
+      btn.addEventListener('click', () => { currentPageIdx = parseInt(btn.dataset.idx, 10); updateTabBar(pages); })
+    );
+  }
+
+  // ── Login detection ───────────────────────────────────────
+  function handleLoginDetected() {
+    // Show success card immediately — don't make user wait for finish-login
+    showSuccess();
+    // finish-login runs in background: closes Camoufox, records DB, checks portal
+    setTimeout(finishLogin, 50);
+  }
+
+  async function finishLogin() {
+    if (finishInFlight) return;
+    finishInFlight = true;
+    try {
+      await apiPost('finish-login');
+    } catch (_) {
+      // Non-critical — success already shown, watcher handles any follow-up
+    } finally {
+      finishInFlight = false;
+      setTimeout(() => window.close(), 900);
+    }
+  }
+
+  // ── Error recovery: check real browser state before showing error ────────
+  // Called when an API call fails but the browser might have succeeded anyway
+  // (e.g. NS_BINDING_ABORTED fired after email was already submitted).
+  // If browser is in a useful state we silently transition; only if it's truly
+  // broken do we show an error message — and NEVER auto-redirect to canvas.
+  async function recoverFromApiError(fromStep, errMsg) {
+    try {
+      const ps = await apiGet('login-page-state');
+      const s  = ps.state;
+      if (s === 'code_form') {
+        setFormStatus('Verification code sent — check your email.', 'ok');
+        setStatus('Waiting for OTP code…');
+        setSubmitBusy(false);
+        setBrowserOpen(true);
+        enterOtpStep();
+        connectWS();
+        return;
       }
+      if (s === 'logged_in') {
+        loginDetected = true; setSubmitBusy(false); handleLoginDetected(); return;
+      }
+      if (s === 'new_account_setup') {
+        setSubmitBusy(false); showNewAccountError(); return;
+      }
+      // Browser state is genuinely unclear — show error, let user retry
+      setFormStatus(errMsg ? `Error: ${errMsg}` : 'Something went wrong. Please try again.', 'err');
+    } catch (_) {
+      setFormStatus(errMsg ? `Error: ${errMsg}` : 'Something went wrong. Please try again.', 'err');
+    }
+    setSubmitBusy(false);
+    // DO NOT redirect to canvas automatically — user must click "Show browser window"
+  }
 
-      async function finishLogin() {
-        if (finishInFlight) return;
-        finishInFlight = true;
-        try {
-          const state = await postAction("finish-login");
-          setStatus(state.login_detected ? "Login saved. Closing browser..." : "Login is not complete yet.");
-          if (state.login_detected || !state.browser_open) {
-            window.setTimeout(() => window.close(), 600);
-          }
-        } catch (error) {
-          setStatus(`Finish login failed: ${error.message}`);
-        } finally {
-          finishInFlight = false;
+  // ── Email form submit ─────────────────────────────────────
+  async function handleEmailSubmit() {
+
+    // ── STEP 1: send magic link via Camoufox ─────────────────
+    if (emailStep === 'email') {
+      const email = emailInput.value.trim();
+      if (!email) { emailInput.focus(); return; }
+
+      // Guard: ignore double-clicks while request is in flight
+      if (emailLoginFlight) return;
+      emailLoginFlight = true;
+
+      setSubmitBusy(true, 'Sending code…');
+      setFormStatus('Opening secure browser, sending verification code…', 'info');
+      setStatus('Camoufox starting…');
+
+      try {
+        const result = await apiPostJson('start-email-login', { email });
+        const state  = result.state || 'unknown';
+
+        setBrowserOpen(result.browser?.browser_open ?? true);
+
+        if (state === 'logged_in' || result.browser?.login_detected) {
+          loginDetected = true; setSubmitBusy(false); handleLoginDetected(); return;
         }
-      }
-
-      async function closeBrowser() {
-        try {
-          await postAction("close-browser");
-          setStatus("Browser closed.");
-          window.setTimeout(() => window.close(), 300);
-        } catch (error) {
-          setStatus(`Close failed: ${error.message}`);
+        if (state === 'new_account_setup') {
+          setSubmitBusy(false); showNewAccountError(); return;
         }
-      }
-
-      async function startGoogleLogin() {
-        try {
-          const state = await postAction("start-google-login");
-          const result = state.google_login || {};
-          if (result.already_logged_in) {
-            setStatus("Already logged in.");
-            return;
-          }
-          if (result.ok) {
-            setStatus("Google login started. Complete sign-in in the browser window.");
-          } else {
-            setStatus(result.reason || "Google login trigger did not find a button.");
-          }
-        } catch (error) {
-          setStatus(`Google login helper failed: ${error.message}`);
+        if (!result.ok) {
+          // API reported error — but check actual browser state before giving up
+          await recoverFromApiError('email');
+          return;
         }
-      }
-
-      async function pollState() {
-        try {
-          const response = await fetch(`/api/accounts/${accountId}/browser-state`);
-          if (!response.ok) throw new Error(await response.text());
-          const state = await response.json();
-          if (state.console_url && state.vnc_ready) {
-            if (loadedConsoleUrl !== state.console_url) {
-              frame.src = state.console_url;
-              loadedConsoleUrl = state.console_url;
-            }
-            frame.classList.add("visible");
-            placeholder.classList.add("hidden");
-            setStatus(state.login_detected ? "Login detected." : "Browser console is ready.");
-          } else if (state.browser_open || waitForBrowser) {
-            setStatus("Starting browser console...");
-          } else {
-            setStatus("No browser window is open.");
-          }
-          if (
-            autoStartGoogleLogin &&
-            state.browser_open &&
-            state.vnc_ready &&
-            !state.login_detected &&
-            !googleKickoffAttempted
-          ) {
-            googleKickoffAttempted = true;
-            await startGoogleLogin();
-          }
-          if (autoFinishLogin && state.login_detected && state.browser_open) {
-            await finishLogin();
-          }
-        } catch (error) {
-          setStatus(`Browser console unavailable: ${error.message}`);
-        } finally {
-          window.setTimeout(pollState, 1500);
+        if (state === 'code_form') {
+          setFormStatus('Verification code sent — check your email.', 'ok');
+          setStatus('Waiting for OTP code…');
+          setSubmitBusy(false);
+          enterOtpStep();
+          connectWS();
+          return;
         }
+        // Unexpected state — check browser directly before showing error
+        await recoverFromApiError('email', `Unexpected state (${state})`);
+
+      } catch (err) {
+        // Network/API error — check actual browser state before showing error
+        await recoverFromApiError('email', err.message);
+      } finally {
+        emailLoginFlight = false;
+      }
+      return;
+    }
+
+    // ── STEP 2: submit OTP ────────────────────────────────────
+    if (emailStep === 'otp') {
+      const rawCode = codeInput.value.replace(/\D/g, '');
+      if (rawCode.length < 6) {
+        setFormStatus('Enter the complete 6-digit code.', 'err');
+        codeInput.focus();
+        return;
       }
 
-      finishButton.addEventListener("click", finishLogin);
-      googleButton.addEventListener("click", startGoogleLogin);
-      closeButton.addEventListener("click", closeBrowser);
-      pollState();
-    </script>
-  </body>
+      setSubmitBusy(true, 'Verifying…');
+      setFormStatus('Verifying code in secure browser…', 'info');
+
+      try {
+        const result = await apiPostJson('submit-otp', { code: rawCode });
+        const state  = result.state || 'unknown';
+
+        if (state === 'logged_in' || result.browser?.login_detected) {
+          loginDetected = true; setSubmitBusy(false); handleLoginDetected(); return;
+        }
+        if (state === 'new_account_setup') {
+          setSubmitBusy(false); showNewAccountError(); return;
+        }
+        if (!result.ok) {
+          setFormStatus(result.reason || 'Verification failed.', 'err');
+          setSubmitBusy(false); codeInput.value = ''; codeInput.focus();
+          return;
+        }
+        if (state === 'code_form') {
+          setFormStatus('Code not accepted — double-check and try again.', 'err');
+          setSubmitBusy(false); codeInput.value = ''; codeInput.focus();
+          return;
+        }
+        // Unknown — canvas fallback
+        setFormStatus('Showing browser to complete sign-in…', 'info');
+        setSubmitBusy(false); setBrowserOpen(true);
+        setTimeout(showCanvas, 800);
+
+      } catch (err) {
+        setFormStatus(`Error: ${err.message}`, 'err');
+        setSubmitBusy(false);
+      }
+    }
+  }
+
+  // Auto-submit OTP on 6 digits
+  codeInput.addEventListener('input', () => {
+    const digits = codeInput.value.replace(/\D/g, '');
+    if (digits !== codeInput.value) codeInput.value = digits;
+    if (digits.length === 6 && emailStep === 'otp') handleEmailSubmit();
+  });
+
+  // Prewarm: start Camoufox in background on first keystroke in email field.
+  // Hides Firefox startup latency behind the user's typing time.
+  // Skip when initHadSessionKey — the profile likely has valid cookies, so
+  // opening the browser would immediately bypass OTP (start-email-login handles
+  // the valid-session case by navigating to /login and detecting the redirect).
+  let prewarmed = false;
+  emailInput.addEventListener('input', () => {
+    if (!prewarmed && emailInput.value.length > 0 && !browserOpen && !initHadSessionKey) {
+      prewarmed = true;
+      apiPost('prewarm').catch(() => {});
+    }
+  });
+
+  document.getElementById('btn-back-email').addEventListener('click', enterEmailStep);
+  document.getElementById('email-form').addEventListener('submit', e => {
+    e.preventDefault(); handleEmailSubmit();
+  });
+
+  // ── Header buttons ────────────────────────────────────────
+  btnToggleView.addEventListener('click', () => {
+    mode === 'canvas' ? showForm() : showCanvas();
+  });
+  btnFinish.addEventListener('click', finishLogin);
+  btnCloseBrowser.addEventListener('click', async () => {
+    try {
+      await apiPost('close-browser');
+      setStatus('Browser closed.');
+      if (ws) ws.close();
+      setTimeout(() => window.close(), 300);
+    } catch (err) {
+      setStatus(`Close failed: ${err.message}`);
+    }
+  });
+  document.getElementById('btn-show-browser-small').addEventListener('click', showCanvas);
+
+  // ── Init ──────────────────────────────────────────────────
+  let initHadSessionKey = false;  // set if profile already has a session key on load
+
+  (async function init() {
+    try {
+      const state = await apiGet('browser-state');
+      setBrowserOpen(state.browser_open);
+
+      // Only auto-complete when the browser is ACTIVELY open and detected logged in.
+      // If browser_open=false, login_detected just means a stale session-key file
+      // exists in the profile — we can't confirm it's valid without opening the
+      // browser.  Show the email form and let start-email-login verify it.
+      if (state.login_detected && state.browser_open) {
+        loginDetected = true; handleLoginDetected(); return;
+      }
+      if (state.login_detected && !state.browser_open) {
+        initHadSessionKey = true;   // suppress prewarm (see below)
+      }
+
+      if (state.browser_open) {
+        setStatus('Browser is open. Sign in below.');
+        connectWS();
+
+        // Detect if browser is already past email step
+        try {
+          const ps = await apiGet('login-page-state');
+          if (ps.state === 'code_form') {
+            setFormStatus('Verification code is waiting — enter it below.', 'ok');
+            setStatus('Waiting for OTP code…');
+            enterOtpStep();
+          } else if (ps.state === 'new_account_setup') {
+            showNewAccountError();
+          }
+        } catch (_) {}
+
+      } else if (waitForBrowser) {
+        setStatus('Browser is starting…');
+        setFormStatus('Browser window is opening…', 'info');
+        waitForBrowserReady(0);
+      } else {
+        setStatus('Ready. Enter your email to sign in.');
+      }
+    } catch (err) {
+      setStatus(`Init error: ${err.message}`);
+    }
+  })();
+
+  function waitForBrowserReady(attempts) {
+    if (attempts > 24) { setStatus('Browser did not open in time. Try refreshing.'); return; }
+    apiGet('browser-state').then(s => {
+      if (s.browser_open) {
+        setBrowserOpen(true);
+        setStatus('Browser is open. Sign in below.');
+        setFormStatus('', 'info');
+        connectWS();
+      } else {
+        setTimeout(() => waitForBrowserReady(attempts + 1), 700);
+      }
+    }).catch(() => setTimeout(() => waitForBrowserReady(attempts + 1), 700));
+  }
+</script>
+
+</body>
 </html>

@@ -1,346 +1,917 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Claude Session Watcher</title>
-    <link rel="stylesheet" href="/static/styles.css" />
-  </head>
-  <body>
-    <header class="topbar">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Claude Session Watcher</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/static/styles.css?v=9"/>
+  <script>document.documentElement.setAttribute('data-theme',localStorage.getItem('csw-theme')||'dark');</script>
+</head>
+<body>
+
+<!-- �?�?�? TOPBAR �?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�? -->
+<header class="topbar">
+  <div class="topbar-brand">
+    <div class="brand-icon">
+      <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+        <circle cx="9" cy="9" r="2.2" fill="currentColor"/>
+        <circle cx="9" cy="9" r="5" stroke="currentColor" stroke-width="1.2" fill="none"/>
+        <circle cx="9" cy="9" r="8" stroke="currentColor" stroke-width="0.7" stroke-dasharray="2.2 2.6" fill="none"/>
+      </svg>
+    </div>
+    <div>
+      <h1>Session Watcher</h1>
+      <span class="topbar-sub">Claude Code Usage Monitor</span>
+    </div>
+  </div>
+  <div class="topbar-right">
+    <div class="live-badge">
+      <span class="live-dot"></span>
+      Live
+    </div>
+    <div class="theme-switcher" title="Switch theme">
+      <button class="theme-btn" data-theme="dark" title="Dark mode">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <path d="M7 1.5A6 6 0 1 0 12.5 7 4.2 4.2 0 0 1 7 1.5z" fill="currentColor"/>
+        </svg>
+      </button>
+      <button class="theme-btn" data-theme="light" title="Light mode">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <circle cx="7" cy="7" r="2.6" fill="currentColor"/>
+          <path d="M7 1v1.2M7 11.8V13M1 7h1.2M11.8 7H13M2.9 2.9l.85.85M10.25 10.25l.85.85M2.9 11.1l.85-.85M10.25 3.75l.85-.85" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <button class="theme-btn" data-theme="contrast" title="High contrast">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+          <circle cx="7" cy="7" r="5.2" stroke="currentColor" stroke-width="1.3"/>
+          <path d="M7 1.8A5.2 5.2 0 0 1 7 12.2z" fill="currentColor"/>
+        </svg>
+      </button>
+    </div>
+    <button class="btn btn-ghost" id="btn-open-log" title="Open event log">
+      <svg width="14" height="14" viewBox="0 0 14 14" fill="none">
+        <rect x="1" y="2" width="12" height="1.5" rx="0.75" fill="currentColor"/>
+        <rect x="1" y="6" width="9" height="1.5" rx="0.75" fill="currentColor"/>
+        <rect x="1" y="10" width="11" height="1.5" rx="0.75" fill="currentColor"/>
+      </svg>
+      Log
+    </button>
+    <a class="btn btn-ghost" href="/health">Health</a>
+  </div>
+</header>
+
+<!-- �?�?�? LOG PANEL (slide-in from right) �?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�? -->
+<div class="log-overlay" id="log-overlay"></div>
+<aside class="log-panel" id="log-panel" aria-label="Event log">
+  <div class="log-panel-header">
+    <span class="log-panel-title">Event Log</span>
+    <div class="log-filters">
+      <button class="filter-btn active" data-level="all">All</button>
+      <button class="filter-btn" data-level="error">Errors</button>
+      <button class="filter-btn" data-level="warning">Warnings</button>
+      <button class="filter-btn" data-level="info">Info</button>
+    </div>
+    <button class="log-close" id="btn-close-log" title="Close">✕</button>
+  </div>
+  <div class="log-panel-body" id="log-panel-body">
+    {% for event in events %}
+    <div class="lp-row lp-row--{{ event.level }}" data-level="{{ event.level }}">
+      <div class="lp-meta">
+        <time class="lp-time ts-fmt" data-ts="{{ event.created_at }}">{{ event.created_at }}</time>
+        <span class="lp-id">#{{ event.account_watcher_id }}{% if event.session_id %}/{{ event.session_id }}{% endif %}</span>
+        <span class="lp-level lp-level--{{ event.level }}">{{ event.level }}</span>
+      </div>
+      <p class="lp-msg">{{ event.message }}</p>
+    </div>
+    {% else %}
+    <p class="lp-empty">No events yet.</p>
+    {% endfor %}
+  </div>
+</aside>
+
+<!-- �?�?�? DELETE CONFIRM MODAL �?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�? -->
+<div class="modal-overlay" id="modal-overlay">
+  <div class="modal-box" role="dialog" aria-modal="true">
+    <div class="modal-icon modal-icon--danger">⚠</div>
+    <h3 class="modal-title" id="modal-title">Delete?</h3>
+    <p class="modal-text" id="modal-text">This action cannot be undone.</p>
+    <div class="modal-actions">
+      <button class="btn btn-danger" id="modal-confirm">Delete</button>
+      <button class="btn btn-ghost" id="modal-cancel">Cancel</button>
+    </div>
+  </div>
+</div>
+
+<!-- �?�?�? SESSION MANAGER MODAL �?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�? -->
+<div class="modal-overlay" id="sessions-overlay">
+  <div class="modal-box modal-box--wide" role="dialog" aria-modal="true">
+    <div class="sessions-modal-header">
+      <h3 class="modal-title" id="sessions-modal-account">Sessions</h3>
+      <div class="sessions-modal-bulk">
+        <button class="btn btn-ghost btn-xs" id="sessions-select-all">Select All</button>
+        <button class="btn btn-ghost btn-xs" id="sessions-deselect-all">Deselect All</button>
+      </div>
+      <button class="log-close" id="btn-close-sessions">✕</button>
+    </div>
+    <div class="sessions-modal-body" id="sessions-modal-body">
+      <p class="lp-empty">Loading…</p>
+    </div>
+    <div class="modal-actions modal-actions--right">
+      <button class="btn btn-primary" id="sessions-modal-done">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- �?�?�? PAGE �?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�? -->
+<div class="page">
+
+  <!-- Top strip: Add account + info -->
+  <div class="top-strip">
+    <section class="card">
+      <h2 class="card-title">Add Account</h2>
+      <form class="add-form" action="/accounts" method="post">
+        <label class="field-label">
+          Account name
+          <input class="field-input" name="name" placeholder="work-account" required/>
+        </label>
+        <button class="btn btn-primary" type="submit">Add</button>
+      </form>
+      <p class="path-hint">{{ data_dir }}</p>
+    </section>
+    <section class="card">
+      <h2 class="card-title">How It Works</h2>
+      <p class="info-text">
+        Usage limits are checked per Claude account. Pause and continue commands are sent only to
+        <strong>selected</strong> sessions. Enable the watcher to start automatic monitoring.
+      </p>
+    </section>
+  </div>
+
+  <!-- Account Cards -->
+  <div class="accounts-grid">
+  {% for row in accounts %}
+  <div class="account-card" data-status="{{ row.insights.status }}" data-account-id="{{ row.account.id }}">
+
+    <!-- Header -->
+    <div class="acct-header">
+      <div class="acct-left">
+        <span class="status-orb" data-s="{{ row.insights.status }}"></span>
+        <div>
+          <div class="acct-name">{{ row.account.name }}</div>
+          <div class="acct-meta">
+            <span class="tag tag--{{ row.account.status }}">{{ row.account.status }}</span>
+            <span class="sel-count">{{ row.watched_count }}/{{ row.session_count }} selected</span>
+          </div>
+        </div>
+      </div>
+      <div class="acct-right">
+        <span class="s-label s-label-{{ row.insights.status }}">{{ row.insights.status }}</span>
+        <span class="s-reason">{{ row.insights.reason }}</span>
+      </div>
+    </div>
+
+    <!-- Usage Meters -->
+    <div class="usage-section">
       <div>
-        <h1>Claude Session Watcher</h1>
-        <p>Account-based monitoring for selected Claude Code sessions.</p>
+        <div class="meter-row">
+          <span class="m-label">5-Hour</span>
+          <div class="m-right">
+            {% if row.ui.five_hour.utilization is not none %}
+            <span class="m-pct">{{ "%.1f"|format(row.ui.five_hour.utilization) }}%</span>
+            <span class="m-reset">↺ {{ row.ui.five_hour.reset_display }}</span>
+            {% else %}
+            <span class="m-na">—</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="progress-track">
+          {% if row.ui.five_hour.utilization is not none %}
+          <div class="progress-fill progress-fill--{% if row.ui.five_hour.utilization >= 95 %}danger{% elif row.ui.five_hour.utilization >= 80 %}warn{% else %}ok{% endif %}"
+               style="width:{{ row.ui.five_hour.utilization }}%;max-width:100%"></div>
+          {% else %}
+          <div class="progress-fill" style="width:0"></div>
+          {% endif %}
+        </div>
       </div>
-      <div class="actions">
-        <a class="button secondary" href="/health">Health</a>
+      <div>
+        <div class="meter-row">
+          <span class="m-label">7-Day</span>
+          <div class="m-right">
+            {% if row.ui.seven_day.utilization is not none %}
+            <span class="m-pct">{{ "%.1f"|format(row.ui.seven_day.utilization) }}%</span>
+            <span class="m-reset">↺ {{ row.ui.seven_day.reset_display }}</span>
+            {% else %}
+            <span class="m-na">—</span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="progress-track">
+          {% if row.ui.seven_day.utilization is not none %}
+          <div class="progress-fill progress-fill--{% if row.ui.seven_day.utilization >= 98 %}danger{% elif row.ui.seven_day.utilization >= 80 %}warn{% else %}ok{% endif %}"
+               style="width:{{ row.ui.seven_day.utilization }}%;max-width:100%"></div>
+          {% else %}
+          <div class="progress-fill" style="width:0"></div>
+          {% endif %}
+        </div>
       </div>
-    </header>
+    </div>
 
-    <main class="layout">
-      <section class="panel">
-        <h2>Add Account</h2>
-        <form class="inline-form" action="/accounts" method="post">
-          <label>
-            Account name
-            <input name="name" placeholder="work-account" required />
+    <!-- Stats Strip -->
+    <div class="stats-strip">
+      <div class="stat-cell">
+        <span class="stat-lbl">Last Check</span>
+        <span class="stat-val">{{ row.ui.last_checked_display }}</span>
+      </div>
+      <div class="stat-cell">
+        <span class="stat-lbl">Burn Rate</span>
+        <span class="stat-val">
+          {% if row.insight_display.five_hour_burn %}5h {{ row.insight_display.five_hour_burn }}{% endif %}
+          {% if row.insight_display.seven_day_burn %} · 7d {{ row.insight_display.seven_day_burn }}{% endif %}
+          {% if not row.insight_display.five_hour_burn and not row.insight_display.seven_day_burn %}collecting…{% endif %}
+        </span>
+      </div>
+      <div class="stat-cell">
+        <span class="stat-lbl">Projected Pause</span>
+        <span class="stat-val">{{ row.insight_display.next_pause or "—" }}</span>
+      </div>
+      <div class="stat-cell">
+        <span class="stat-lbl">Source</span>
+        <span class="stat-val">{{ row.ui.usage_source }}</span>
+      </div>
+    </div>
+
+    <!-- Actions Row -->
+    {% set is_authed = row.account.status in ("logged-in", "active") %}
+    {% set browser_open = row.browser.console_url %}
+    <div class="actions-row" data-actions-row="{{ row.account.id }}">
+      <!-- Auth — always rendered; visibility toggled by live polling -->
+      <form action="/accounts/{{ row.account.id }}/login" method="post" data-login-form>
+        <button type="submit" class="btn btn-ghost"
+          data-open-login data-btn-kind="reauth"
+          data-account-id="{{ row.account.id }}"
+          data-display-enabled="{{ '1' if row.browser.display_enabled else '0' }}"
+          title="Login is active — click to re-authenticate if cookies expired"
+          {% if not is_authed %}hidden{% endif %}>
+          Re-auth
+        </button>
+        <button type="submit" class="btn btn-accent"
+          data-open-login data-btn-kind="open-login"
+          data-account-id="{{ row.account.id }}"
+          data-display-enabled="{{ '1' if row.browser.display_enabled else '0' }}"
+          {% if is_authed %}hidden{% endif %}>
+          Open Login
+        </button>
+      </form>
+      <!-- Browser-open-only buttons — hidden until browser is active -->
+      <a class="btn btn-ghost" href="/browser-console?account_id={{ row.account.id }}"
+         target="_blank" rel="noreferrer"
+         data-browser-btn="console"
+         {% if not browser_open %}hidden{% endif %}>Console</a>
+      <form action="/accounts/{{ row.account.id }}/finish-login" method="post"
+            data-browser-btn="finish-form"
+            {% if not browser_open %}hidden{% endif %}>
+        <button type="submit" class="btn btn-ghost">Finish Login</button>
+      </form>
+      <form action="/accounts/{{ row.account.id }}/close-browser" method="post"
+            data-browser-btn="close-form"
+            {% if not browser_open %}hidden{% endif %}>
+        <button type="submit" class="btn btn-ghost">Close Browser</button>
+      </form>
+
+      <span class="action-divider"></span>
+
+      <!-- Data -->
+      <form action="/accounts/{{ row.account.id }}/discover" method="post">
+        <button type="submit" class="btn btn-ghost">Discover</button>
+      </form>
+      <form action="/accounts/{{ row.account.id }}/probe" method="post">
+        <button type="submit" class="btn btn-ghost">Probe</button>
+      </form>
+      <form action="/account-watchers/{{ row.watcher.id }}/check" method="post">
+        <button type="submit" class="btn btn-ghost">Check Now</button>
+      </form>
+
+      <span class="actions-spacer"></span>
+
+      <!-- Watcher toggle — always rendered, visibility swapped by live polling -->
+      <form action="/account-watchers/{{ row.watcher.id }}/disable" method="post"
+            data-watcher-btn="disable"
+            {% if not row.watcher.enabled %}hidden{% endif %}>
+        <button type="submit" class="btn btn-danger">Disable Watcher</button>
+      </form>
+      <form action="/account-watchers/{{ row.watcher.id }}/enable" method="post"
+            data-watcher-btn="enable"
+            {% if row.watcher.enabled %}hidden{% endif %}>
+        <button type="submit" class="btn btn-accent">Enable Watcher</button>
+      </form>
+      <form action="/accounts/{{ row.account.id }}/delete" method="post"
+            data-confirm="Delete account '{{ row.account.name }}' and all its sessions and data?"
+            data-confirm-label="Delete account">
+        <button type="submit" class="btn btn-ghost btn-icon" title="Delete account">
+          <svg width="13" height="13" viewBox="0 0 13 13" fill="none">
+            <path d="M2 3h9M5 3V2h3v1M4 3v7a1 1 0 001 1h3a1 1 0 001-1V3" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/>
+          </svg>
+        </button>
+      </form>
+    </div>
+
+    <!-- Settings Drawer -->
+    <details class="settings-drawer">
+      <summary>
+        <span class="settings-drawer-icon">›</span>
+        <span>Watcher Settings</span>
+        <span class="last-reason">{{ row.watcher.last_reason or "" }}</span>
+      </summary>
+      <div class="settings-body">
+        <form class="settings-grid" action="/account-watchers/{{ row.watcher.id }}" method="post">
+          <label class="field-label checkbox-field" style="align-self:end;padding-bottom:10px;">
+            <input type="checkbox" name="enabled" {% if row.watcher.enabled %}checked{% endif %}/>
+            <span>Enabled</span>
           </label>
-          <button type="submit">Add account</button>
+          <label class="field-label">
+            5h Threshold %
+            <input class="field-input" name="five_hour_threshold" type="number"
+                   value="{{ row.watcher.five_hour_threshold }}" min="1" max="100" step="0.1"/>
+          </label>
+          <label class="field-label">
+            7d Threshold %
+            <input class="field-input" name="seven_day_threshold" type="number"
+                   value="{{ row.watcher.seven_day_threshold }}" min="1" max="100" step="0.1"/>
+          </label>
+          <label class="field-label">
+            Check Interval (s)
+            <input class="field-input" name="check_interval_seconds" type="number"
+                   value="{{ row.watcher.check_interval_seconds }}" min="10"/>
+          </label>
+          <label class="field-label settings-wide">
+            Pause Template
+            <select class="field-input" name="pause_template" data-template-select>
+              <option value="custom" {% if row.watcher.pause_template == "custom" %}selected{% endif %}>
+                Custom — write your own message
+              </option>
+              {% for template in pause_templates %}
+              <option value="{{ template.key }}"
+                      data-msg="{{ template.message }}"
+                      {% if row.watcher.pause_template == template.key %}selected{% endif %}>
+                {{ template.label }}
+              </option>
+              {% endfor %}
+            </select>
+          </label>
+          <!-- Template preview (shown when preset is selected) -->
+          <div class="tpl-preview settings-wide" data-template-preview style="display:none;">
+            <span class="tpl-preview-label">Template message (read-only when preset selected):</span>
+            <p class="tpl-preview-text" data-template-preview-text></p>
+          </div>
+          <label class="field-label settings-wide" data-template-custom-label>
+            Pause Message
+            <textarea class="field-input" name="pause_message" rows="3"
+                      data-template-textarea>{{ row.watcher.pause_message }}</textarea>
+          </label>
+          <label class="field-label settings-wide">
+            Continue Message
+            <input class="field-input" name="continue_message" value="{{ row.watcher.continue_message }}"/>
+          </label>
+          <div class="settings-wide">
+            <button class="btn btn-primary" type="submit">Save Settings</button>
+          </div>
         </form>
-        <p class="empty">Data directory: <span class="path">{{ data_dir }}</span></p>
-      </section>
+      </div>
+    </details>
 
-      <section class="panel">
-        <h2>Selection Rule</h2>
-        <p class="empty">
-          Limit checks run per Claude account. Pause and continue commands are sent only to
-          sessions explicitly enabled below.
-        </p>
-      </section>
+    <!-- Sessions -->
+    <div>
+      <div class="sessions-header">
+        <h3>Sessions</h3>
+        <div class="sessions-header-right">
+          <button class="btn btn-ghost btn-xs"
+                  data-manage-sessions="{{ row.account.id }}"
+                  data-account-name="{{ row.account.name }}">
+            Manage Sessions
+          </button>
+          <span class="sessions-hint">Only selected receive commands.</span>
+        </div>
+      </div>
 
-      <section class="panel wide-panel">
-        <h2>Accounts And Sessions</h2>
-
-        {% for row in accounts %}
-        <div class="account-block">
-          <div class="account-head">
-            <div>
-              <h3>{{ row.account.name }}</h3>
-              <p>
-                <span class="status">{{ row.account.status }}</span>
-                <span class="muted inline">
-                  {{ row.watched_count }}/{{ row.session_count }} sessions selected
-                </span>
-              </p>
-              <p class="path">{{ row.account.profile_dir }}</p>
-            </div>
-            <div class="actions">
-              <form action="/accounts/{{ row.account.id }}/login" method="post" data-login-form>
-                <button
-                  type="submit"
-                  class="secondary"
-                  data-open-login
-                  data-account-id="{{ row.account.id }}"
-                  data-display-enabled="{{ '1' if row.browser.display_enabled else '0' }}"
-                >
-                  Open login
-                </button>
-              </form>
-              {% if row.browser.console_url %}
-              <a
-                class="button secondary"
-                href="/browser-console?account_id={{ row.account.id }}"
-                target="_blank"
-                rel="noreferrer"
-              >
-                Browser console
-              </a>
-              {% endif %}
-              <form action="/accounts/{{ row.account.id }}/finish-login" method="post">
-                <button type="submit" class="secondary">Finish login</button>
-              </form>
-              <form action="/accounts/{{ row.account.id }}/close-browser" method="post">
-                <button type="submit" class="secondary">Close browser</button>
-              </form>
-              <form action="/accounts/{{ row.account.id }}/discover" method="post">
-                <button type="submit" class="secondary">Discover</button>
-              </form>
-              <form action="/accounts/{{ row.account.id }}/probe" method="post">
-                <button type="submit" class="secondary">Probe</button>
-              </form>
-              <form action="/account-watchers/{{ row.watcher.id }}/check" method="post">
-                <button type="submit" class="secondary">Check</button>
-              </form>
-              {% if row.watcher.enabled %}
-              <form action="/account-watchers/{{ row.watcher.id }}/disable" method="post">
-                <button type="submit" class="danger">Disable</button>
-              </form>
-              {% else %}
-              <form action="/account-watchers/{{ row.watcher.id }}/enable" method="post">
-                <button type="submit" class="secondary">Enable</button>
-              </form>
-              {% endif %}
-            </div>
-          </div>
-
-          <div class="limit-grid">
-            <div>
-              <span class="label-text">Status</span>
-              <span class="status {{ row.insights.status }}">{{ row.insights.status }}</span>
-              <span class="muted">{{ row.insights.reason }}</span>
-            </div>
-            <div>
-              <span class="label-text">5h</span>
-              {% if row.ui.five_hour.utilization is not none %}
-              <span class="metric">{{ "%.1f"|format(row.ui.five_hour.utilization) }}%</span>
-              <span class="muted">reset {{ row.ui.five_hour.reset_display }}</span>
-              {% else %}
-              <span class="muted">unknown</span>
-              {% endif %}
-            </div>
-            <div>
-              <span class="label-text">7d</span>
-              {% if row.ui.seven_day.utilization is not none %}
-              <span class="metric">{{ "%.1f"|format(row.ui.seven_day.utilization) }}%</span>
-              <span class="muted">reset {{ row.ui.seven_day.reset_display }}</span>
-              {% else %}
-              <span class="muted">unknown</span>
-              {% endif %}
-            </div>
-            <div>
-              <span class="label-text">Last check</span>
-              <span class="timestamp">{{ row.ui.last_checked_display }}</span>
-            </div>
-            <div>
-              <span class="label-text">Burn</span>
-              {% if row.insight_display.five_hour_burn %}
-              <span>5h {{ row.insight_display.five_hour_burn }}</span>
-              {% endif %}
-              {% if row.insight_display.seven_day_burn %}
-              <span class="muted">7d {{ row.insight_display.seven_day_burn }}</span>
-              {% endif %}
-              {% if not row.insight_display.five_hour_burn and not row.insight_display.seven_day_burn %}
-              <span class="muted">collecting history</span>
-              {% endif %}
-            </div>
-            <div>
-              <span class="label-text">Projected pause</span>
-              <span>{{ row.insight_display.next_pause or "" }}</span>
-            </div>
-            <div>
-              <span class="label-text">Source</span>
-              <span>{{ row.ui.usage_source }}</span>
-            </div>
-            <div>
-              <span class="label-text">Reason</span>
-              <span>{{ row.watcher.last_reason or "" }}</span>
-            </div>
-          </div>
-
-          <form
-            class="watcher-form compact-form"
-            action="/account-watchers/{{ row.watcher.id }}"
-            method="post"
-          >
-            <label class="checkbox-row">
-              <input name="enabled" type="checkbox" {% if row.watcher.enabled %}checked{% endif %} />
-              Enabled
-            </label>
-            <label>
-              5h threshold
-              <input
-                name="five_hour_threshold"
-                type="number"
-                value="{{ row.watcher.five_hour_threshold }}"
-                min="1"
-                max="100"
-                step="0.1"
-              />
-            </label>
-            <label>
-              7d threshold
-              <input
-                name="seven_day_threshold"
-                type="number"
-                value="{{ row.watcher.seven_day_threshold }}"
-                min="1"
-                max="100"
-                step="0.1"
-              />
-            </label>
-            <label>
-              Check interval
-              <input
-                name="check_interval_seconds"
-                type="number"
-                value="{{ row.watcher.check_interval_seconds }}"
-                min="10"
-              />
-            </label>
-            <label>
-              Pause template
-              <select name="pause_template">
-                <option value="custom" {% if row.watcher.pause_template == "custom" %}selected{% endif %}>
-                  Custom
-                </option>
-                {% for template in pause_templates %}
-                <option
-                  value="{{ template.key }}"
-                  {% if row.watcher.pause_template == template.key %}selected{% endif %}
-                >
-                  {{ template.label }}
-                </option>
-                {% endfor %}
-              </select>
-            </label>
-            <label class="wide">
-              Pause message
-              <textarea name="pause_message" rows="2">{{ row.watcher.pause_message }}</textarea>
-            </label>
-            <label class="wide">
-              Continue message
-              <input name="continue_message" value="{{ row.watcher.continue_message }}" />
-            </label>
-            <button type="submit">Save account watcher</button>
+      {% for session in row.sessions if session.watch_enabled %}
+      <div class="session-row session-row--selected"
+           data-session-id="{{ session.id }}"
+           data-session-watch="1">
+        <div class="watch-col">
+          <span class="watch-dot watch-dot--on"></span>
+        </div>
+        <div class="session-info">
+          <div class="session-title" title="{{ session.title }}">{{ session.title }}</div>
+          <div class="session-key">{{ session.session_key }}</div>
+          {% if session.last_control_error %}
+          <div class="session-error">{{ session.last_control_error }}</div>
+          {% endif %}
+        </div>
+        <div class="session-badges">
+          <span class="badge badge--kind">{{ session.kind }}</span>
+          <span class="badge badge--{{ session.status }}">{{ session.status }}</span>
+          {% if session.control_supported %}
+          <span class="badge badge--ctrl" title="Remote Control supported">RC</span>
+          {% endif %}
+        </div>
+        {% if session.last_seen_at %}
+        <div class="session-time ts-fmt" data-ts="{{ session.last_seen_at }}">{{ session.last_seen_at }}</div>
+        {% else %}
+        <div class="session-time">—</div>
+        {% endif %}
+        <div class="session-actions">
+          <a class="btn btn-ghost btn-xs" href="{{ session.url }}" target="_blank" rel="noreferrer">Open</a>
+          <form action="/sessions/{{ session.id }}/disable" method="post">
+            <button type="submit" class="btn btn-danger btn-xs">Unselect</button>
           </form>
-
-          <div class="session-head">
-            <h3>Sessions</h3>
-            <span class="muted inline">Only selected sessions receive commands.</span>
-          </div>
-          <div class="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Selected</th>
-                  <th>Title</th>
-                  <th>Kind</th>
-                  <th>Status</th>
-                  <th>Control</th>
-                  <th>Last seen</th>
-                  <th>Last control error</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {% for session in row.sessions %}
-                <tr>
-                  <td>{{ "yes" if session.watch_enabled else "no" }}</td>
-                  <td>
-                    <span class="metric">{{ session.title }}</span>
-                    <span class="path">{{ session.session_key }}</span>
-                  </td>
-                  <td>{{ session.kind }}</td>
-                  <td><span class="status">{{ session.status }}</span></td>
-                  <td>{{ "yes" if session.control_supported else "no" }}</td>
-                  <td>{{ session.last_seen_at or "" }}</td>
-                  <td>{{ session.last_control_error or "" }}</td>
-                  <td class="actions">
-                    <a class="button secondary" href="{{ session.url }}" target="_blank" rel="noreferrer">Open</a>
-                    {% if session.watch_enabled %}
-                    <form action="/sessions/{{ session.id }}/disable" method="post">
-                      <button type="submit" class="danger">Unselect</button>
-                    </form>
-                    {% else %}
-                    <form action="/sessions/{{ session.id }}/enable" method="post">
-                      <button type="submit" class="secondary">Select</button>
-                    </form>
-                    {% endif %}
-                  </td>
-                </tr>
-                {% else %}
-                <tr><td colspan="8" class="empty">No sessions discovered or added yet.</td></tr>
-                {% endfor %}
-              </tbody>
-            </table>
-          </div>
-
-          <form class="watcher-form session-form" action="/sessions" method="post">
-            <input name="account_id" type="hidden" value="{{ row.account.id }}" />
-            <label>
-              Session title
-              <input name="title" placeholder="main-project" required />
-            </label>
-            <label class="wide">
-              Remote Control URL
-              <input name="remote_url" placeholder="https://claude.ai/code/..." required />
-            </label>
-            <label class="checkbox-row">
-              <input name="watch_enabled" type="checkbox" checked />
-              Select for watching
-            </label>
-            <button type="submit">Add session</button>
+          <form action="/sessions/{{ session.id }}/delete" method="post"
+                data-confirm="Delete session '{{ session.title }}'?"
+                data-confirm-label="Delete session">
+            <button type="submit" class="btn btn-ghost btn-icon btn-xs" title="Delete session">
+              <svg width="11" height="11" viewBox="0 0 11 11" fill="none">
+                <path d="M1.5 2.5h8M4 2.5V2h3v.5M3 2.5v6a.75.75 0 00.75.75h3.5A.75.75 0 008 8.5v-6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/>
+              </svg>
+            </button>
           </form>
+        </div>
+      </div>
+      {% else %}
+        {% if row.session_count > 0 %}
+        <div class="sessions-empty">
+          No sessions selected. Use
+          <button class="btn btn-ghost btn-xs" style="vertical-align:middle"
+                  data-manage-sessions="{{ row.account.id }}"
+                  data-account-name="{{ row.account.name }}">Manage Sessions</button>
+          to choose which sessions appear here.
         </div>
         {% else %}
-        <p class="empty">No accounts yet.</p>
-        {% endfor %}
-      </section>
+        <div class="sessions-empty">No sessions discovered yet. Click <strong>Discover</strong> to scan.</div>
+        {% endif %}
+      {% endfor %}
+      {% set hidden_count = row.session_count - row.watched_count %}
+      {% if hidden_count > 0 and row.watched_count > 0 %}
+      <div class="sessions-hidden-hint">
+        {{ hidden_count }} session{{ 's' if hidden_count != 1 else '' }} hidden —
+        <button class="btn btn-ghost btn-xs" style="vertical-align:middle"
+                data-manage-sessions="{{ row.account.id }}"
+                data-account-name="{{ row.account.name }}">Manage Sessions</button>
+      </div>
+      {% endif %}
 
-      <section class="panel wide-panel">
-        <h2>Recent Events</h2>
-        <div class="events">
-          {% for event in events %}
-          <div class="event {{ event.level }}">
-            <time>{{ event.created_at }}</time>
-            <span>#{{ event.account_watcher_id }}{% if event.session_id %}/{{ event.session_id }}{% endif %}</span>
-            <p>{{ event.message }}</p>
+      <!-- Add Session -->
+      <details class="add-session-drawer">
+        <summary>+ Add Session Manually</summary>
+        <form class="add-session-form" action="/sessions" method="post">
+          <input name="account_id" type="hidden" value="{{ row.account.id }}"/>
+          <label class="field-label">
+            Session Title
+            <input class="field-input" name="title" placeholder="main-project" required/>
+          </label>
+          <label class="field-label">
+            Remote Control URL
+            <input class="field-input" name="remote_url" placeholder="https://claude.ai/code/..." required/>
+          </label>
+          <label class="field-label checkbox-field" style="align-self:end;padding-bottom:10px;">
+            <input type="checkbox" name="watch_enabled" checked/>
+            <span>Select for watching</span>
+          </label>
+          <div style="align-self:end;">
+            <button class="btn btn-ghost" type="submit">Add Session</button>
           </div>
-          {% else %}
-          <p class="empty">No events yet.</p>
-          {% endfor %}
-        </div>
-      </section>
-    </main>
-    <script>
-      for (const form of document.querySelectorAll("[data-login-form]")) {
-        form.addEventListener("submit", async (event) => {
-          const button = form.querySelector("[data-open-login]");
-          if (!button) return;
-          event.preventDefault();
-          const accountId = button.dataset.accountId;
-          const shouldOpenConsole = button.dataset.displayEnabled === "1";
-          const consoleWindow = shouldOpenConsole
-            ? window.open(
-                `/browser-console?account_id=${accountId}&wait=1`,
-                `csw-browser-console-${accountId}`,
-              )
-            : null;
-          button.disabled = true;
-          try {
-            const response = await fetch(`/api/accounts/${accountId}/login`, { method: "POST" });
-            if (!response.ok) throw new Error(await response.text());
-            if (consoleWindow) consoleWindow.focus();
-            window.setTimeout(() => window.location.reload(), 800);
-          } catch (error) {
-            button.disabled = false;
-            try {
-              if (consoleWindow && !consoleWindow.closed) consoleWindow.close();
-            } catch (e) {}
-            alert(`Open login failed: ${error.message}`);
-          }
-        });
+        </form>
+      </details>
+    </div>
+
+  </div><!-- .account-card -->
+  {% else %}
+  <div class="empty-state">
+    <span class="empty-icon">◉</span>
+    <h2>No accounts configured</h2>
+    <p>Add a Claude account above to start monitoring session usage.</p>
+  </div>
+  {% endfor %}
+  </div><!-- .accounts-grid -->
+
+</div><!-- .page -->
+
+<!-- �?�?�? SCRIPTS �?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�?�? -->
+<script>
+// ─── Pause template data ──────────────────────────────────────────
+const PAUSE_TEMPLATES = {
+  {% for t in pause_templates %}"{{ t.key }}": {{ t.message | tojson }},
+  {% endfor %}
+};
+
+// ─── Template select: preview / toggle textarea ───────────────────
+document.querySelectorAll('[data-template-select]').forEach(sel => {
+  const form = sel.closest('form');
+  const preview = form.querySelector('[data-template-preview]');
+  const previewText = form.querySelector('[data-template-preview-text]');
+  const customLabel = form.querySelector('[data-template-custom-label]');
+  const textarea = form.querySelector('[data-template-textarea]');
+
+  function applyTemplate() {
+    const val = sel.value;
+    if (val === 'custom') {
+      preview.style.display = 'none';
+      customLabel.style.display = '';
+    } else {
+      const msg = PAUSE_TEMPLATES[val] || '';
+      previewText.textContent = msg;
+      preview.style.display = '';
+      customLabel.style.display = 'none';
+    }
+  }
+  sel.addEventListener('change', applyTemplate);
+  applyTemplate();
+});
+
+// ─── Log Panel ────────────────────────────────────────────────────
+const logPanel   = document.getElementById('log-panel');
+const logOverlay = document.getElementById('log-overlay');
+const openLogBtn = document.getElementById('btn-open-log');
+const closeLogBtn = document.getElementById('btn-close-log');
+
+function openLog() {
+  logPanel.classList.add('log-panel--open');
+  logOverlay.classList.add('log-overlay--visible');
+}
+function closeLog() {
+  logPanel.classList.remove('log-panel--open');
+  logOverlay.classList.remove('log-overlay--visible');
+}
+openLogBtn.addEventListener('click', openLog);
+closeLogBtn.addEventListener('click', closeLog);
+logOverlay.addEventListener('click', closeLog);
+
+// Log filters
+document.querySelectorAll('.filter-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    const level = btn.dataset.level;
+    document.querySelectorAll('.lp-row').forEach(row => {
+      row.style.display = (level === 'all' || row.dataset.level === level) ? '' : 'none';
+    });
+  });
+});
+
+// ─── Delete Confirm Modal ─────────────────────────────────────────
+const modalOverlay = document.getElementById('modal-overlay');
+const modalTitle   = document.getElementById('modal-title');
+const modalText    = document.getElementById('modal-text');
+const modalConfirm = document.getElementById('modal-confirm');
+const modalCancel  = document.getElementById('modal-cancel');
+let pendingDeleteForm = null;
+
+document.querySelectorAll('[data-confirm]').forEach(form => {
+  form.addEventListener('submit', e => {
+    e.preventDefault();
+    pendingDeleteForm = form;
+    modalTitle.textContent = form.dataset.confirmLabel || 'Delete?';
+    modalText.textContent = form.dataset.confirm;
+    modalOverlay.classList.add('modal-overlay--visible');
+  });
+});
+
+modalConfirm.addEventListener('click', () => {
+  if (pendingDeleteForm) {
+    pendingDeleteForm.removeEventListener('submit', () => {});
+    pendingDeleteForm.submit();
+  }
+  closeModal();
+});
+modalCancel.addEventListener('click', closeModal);
+modalOverlay.addEventListener('click', e => { if (e.target === modalOverlay) closeModal(); });
+function closeModal() {
+  modalOverlay.classList.remove('modal-overlay--visible');
+  pendingDeleteForm = null;
+}
+
+// ─── Session Manager Modal ────────────────────────────────────────
+const sessionsOverlay = document.getElementById('sessions-overlay');
+const sessionsBody    = document.getElementById('sessions-modal-body');
+const sessionsTitle   = document.getElementById('sessions-modal-account');
+let currentAccountId  = null;
+let pendingToggles    = [];
+
+document.querySelectorAll('[data-manage-sessions]').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    currentAccountId = btn.dataset.manageSessions;
+    sessionsTitle.textContent = `Sessions — ${btn.dataset.accountName}`;
+    sessionsBody.innerHTML = '<p class="lp-empty">Loading…</p>';
+    sessionsOverlay.classList.add('modal-overlay--visible');
+    pendingToggles = [];
+    await refreshSessionsModal();
+  });
+});
+
+async function refreshSessionsModal() {
+  try {
+    const res = await fetch(`/api/accounts/${currentAccountId}/sessions`);
+    const sessions = await res.json();
+    renderSessionsModal(sessions);
+  } catch (e) {
+    sessionsBody.innerHTML = `<p class="lp-empty" style="color:var(--red)">Failed to load sessions: ${e.message}</p>`;
+  }
+}
+
+const STATUS_ORDER = { running: 0, paused: 1, idle: 2, archived: 3 };
+const KIND_ORDER   = { remote: 0, cloud: 1, local: 2 };
+
+function renderSessionsModal(sessions) {
+  if (!sessions.length) {
+    sessionsBody.innerHTML = '<p class="lp-empty">No sessions. Use Discover to find sessions.</p>';
+    return;
+  }
+  sessions.sort((a, b) => {
+    // Selected sessions first
+    if (a.watch_enabled !== b.watch_enabled) return a.watch_enabled ? -1 : 1;
+    // Then by status priority
+    const sa = STATUS_ORDER[a.status] ?? 9, sb = STATUS_ORDER[b.status] ?? 9;
+    if (sa !== sb) return sa - sb;
+    // Then by kind
+    const ka = KIND_ORDER[a.kind] ?? 9, kb = KIND_ORDER[b.kind] ?? 9;
+    if (ka !== kb) return ka - kb;
+    // Then alphabetically
+    return String(a.title).localeCompare(String(b.title));
+  });
+  sessionsBody.innerHTML = sessions.map(s => `
+    <div class="sm-row" data-session-id="${s.id}" data-watch="${s.watch_enabled ? '1':'0'}">
+      <button class="sm-toggle ${s.watch_enabled ? 'sm-toggle--on' : ''}" data-sid="${s.id}" data-on="${s.watch_enabled ? '1':'0'}">
+        <span class="sm-toggle-dot"></span>
+      </button>
+      <div class="sm-info">
+        <span class="sm-title">${escHtml(s.title)}</span>
+        <span class="sm-key">${escHtml(s.session_key)}</span>
+      </div>
+      <div class="sm-badges">
+        <span class="badge badge--kind">${escHtml(s.kind)}</span>
+        <span class="badge badge--${escHtml(s.status)}">${escHtml(s.status)}</span>
+        ${s.control_supported ? '<span class="badge badge--ctrl">RC</span>' : ''}
+      </div>
+      <a class="btn btn-ghost btn-xs" href="${escHtml(s.url)}" target="_blank" rel="noreferrer">Open</a>
+    </div>
+  `).join('');
+
+  sessionsBody.querySelectorAll('.sm-toggle').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const sid = btn.dataset.sid;
+      const isOn = btn.dataset.on === '1';
+      const action = isOn ? 'disable' : 'enable';
+      btn.disabled = true;
+      try {
+        await fetch(`/api/sessions/${sid}/${action}`, { method: 'POST' });
+        btn.dataset.on = isOn ? '0' : '1';
+        btn.classList.toggle('sm-toggle--on', !isOn);
+        pendingToggles.push(sid);
+      } finally {
+        btn.disabled = false;
       }
-    </script>
-  </body>
+    });
+  });
+}
+
+document.getElementById('btn-close-sessions').addEventListener('click', closeSessions);
+document.getElementById('sessions-modal-done').addEventListener('click', () => {
+  closeSessions();
+  if (pendingToggles.length) window.location.reload();
+});
+sessionsOverlay.addEventListener('click', e => { if (e.target === sessionsOverlay) { closeSessions(); if (pendingToggles.length) window.location.reload(); } });
+function closeSessions() { sessionsOverlay.classList.remove('modal-overlay--visible'); }
+
+document.getElementById('sessions-select-all').addEventListener('click', async () => {
+  const rows = sessionsBody.querySelectorAll('.sm-toggle:not(.sm-toggle--on)');
+  for (const btn of rows) {
+    btn.disabled = true;
+    try { await fetch(`/api/sessions/${btn.dataset.sid}/enable`, { method: 'POST' }); btn.dataset.on = '1'; btn.classList.add('sm-toggle--on'); pendingToggles.push(btn.dataset.sid); } finally { btn.disabled = false; }
+  }
+});
+document.getElementById('sessions-deselect-all').addEventListener('click', async () => {
+  const rows = sessionsBody.querySelectorAll('.sm-toggle.sm-toggle--on');
+  for (const btn of rows) {
+    btn.disabled = true;
+    try { await fetch(`/api/sessions/${btn.dataset.sid}/disable`, { method: 'POST' }); btn.dataset.on = '0'; btn.classList.remove('sm-toggle--on'); pendingToggles.push(btn.dataset.sid); } finally { btn.disabled = false; }
+  }
+});
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ─── Login form ───────────────────────────────────────────────────
+document.querySelectorAll('[data-login-form]').forEach(form => {
+  form.addEventListener('submit', async e => {
+    // Find whichever open-login button is currently visible
+    const btn = [...form.querySelectorAll('[data-open-login]')].find(b => !b.hidden);
+    if (!btn) return;
+    e.preventDefault();
+    const accountId = btn.dataset.accountId;
+    const openConsole = btn.dataset.displayEnabled === '1';
+    const cw = openConsole ? window.open(`/browser-console?account_id=${accountId}&wait=1`, `csw-${accountId}`) : null;
+    const orig = btn.textContent;
+    btn.disabled = true; btn.textContent = 'Opening…';
+    try {
+      const r = await fetch(`/api/accounts/${accountId}/login`, { method: 'POST' });
+      if (!r.ok) throw new Error(await r.text());
+      if (cw) cw.focus();
+      setTimeout(() => window.location.reload(), 800);
+    } catch (err) {
+      btn.disabled = false; btn.textContent = orig;
+      try { if (cw && !cw.closed) cw.close(); } catch {}
+      alert(`Open login failed: ${err.message}`);
+    }
+  });
+});
+
+// ─── Timestamp formatter ──────────────────────────────────────────
+function formatTs(isoStr) {
+  try {
+    const d = new Date(isoStr);
+    if (isNaN(d.getTime())) return isoStr;
+    const now = new Date();
+    const isToday = d.toDateString() === now.toDateString();
+    const isThisYear = d.getFullYear() === now.getFullYear();
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const mo = String(d.getMonth() + 1).padStart(2, '0');
+    if (isToday)     return `${hh}:${mm}`;
+    if (isThisYear)  return `${dd}.${mo}. ${hh}:${mm}`;
+    return `${dd}.${mo}.${d.getFullYear()} ${hh}:${mm}`;
+  } catch (e) { return isoStr; }
+}
+document.querySelectorAll('.ts-fmt[data-ts]').forEach(el => {
+  const raw = el.dataset.ts;
+  if (raw) el.textContent = formatTs(raw);
+});
+
+// ─── Theme Switcher ───────────────────────────────────────────────
+(function () {
+  function applyTheme(t) {
+    document.documentElement.setAttribute('data-theme', t);
+    localStorage.setItem('csw-theme', t);
+    document.querySelectorAll('.theme-btn').forEach(b =>
+      b.classList.toggle('active', b.dataset.theme === t)
+    );
+  }
+  // Mark active button on page load
+  const current = document.documentElement.getAttribute('data-theme') || 'dark';
+  applyTheme(current);
+  // Attach click handlers
+  document.querySelectorAll('.theme-btn').forEach(btn =>
+    btn.addEventListener('click', () => applyTheme(btn.dataset.theme))
+  );
+})();
+
+// ─── Live Polling ─────────────────────────────────────────────────
+(function () {
+  const INTERVAL    = 8000;   // ms between polls
+  const STALE_AFTER = 30000;  // show "stale" dot after this many ms without success
+  const liveDot = document.querySelector('.live-dot');
+
+  let pollActive  = false;
+  let lastSuccess = Date.now();
+
+  function setDotState(state) {
+    if (!liveDot) return;
+    liveDot.classList.remove('live-dot--error', 'live-dot--stale');
+    if (state === 'error') liveDot.classList.add('live-dot--error');
+    else if (state === 'stale') liveDot.classList.add('live-dot--stale');
+  }
+
+  async function poll() {
+    if (pollActive) return;
+    pollActive = true;
+    try {
+      const res = await fetch('/api/live');
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const data = await res.json();
+      if (Array.isArray(data.accounts)) {
+        for (const acct of data.accounts) {
+          const card = document.querySelector(`[data-account-id="${acct.id}"]`);
+          if (card) applyAccount(card, acct);
+        }
+      }
+      lastSuccess = Date.now();
+      setDotState('ok');
+    } catch (_) {
+      const stale = Date.now() - lastSuccess > STALE_AFTER;
+      setDotState(stale ? 'error' : 'stale');
+    } finally {
+      pollActive = false;
+      setTimeout(poll, INTERVAL);
+    }
+  }
+
+  // ── Per-account update ─────────────────────────────────────────
+  function applyAccount(card, acct) {
+    const w   = acct.watcher  || {};
+    const ins = acct.insights || {};
+    const br  = acct.browser  || {};
+
+    // Status orb
+    const orb = card.querySelector('.status-orb');
+    if (orb) orb.dataset.s = ins.status || '';
+
+    // Account status tag
+    const tag = card.querySelector('.tag');
+    if (tag) { tag.textContent = acct.status || ''; tag.className = `tag tag--${acct.status || ''}`; }
+
+    // Selected session count
+    const sc = card.querySelector('.sel-count');
+    if (sc) sc.textContent = `${acct.watched_count}/${acct.session_count} selected`;
+
+    // Insight label + reason
+    const sLabel = card.querySelector('.s-label');
+    if (sLabel) { sLabel.textContent = ins.status || ''; sLabel.className = `s-label s-label-${ins.status || ''}`; }
+    const sReason = card.querySelector('.s-reason');
+    if (sReason) sReason.textContent = ins.reason || '';
+
+    // Usage meters (5h = first child div, 7d = second)
+    const usageSec = card.querySelector('.usage-section');
+    if (usageSec) {
+      const divs = usageSec.querySelectorAll(':scope > div');
+      updateMeter(divs[0], w.five_hour, w.reset_5h);
+      updateMeter(divs[1], w.seven_day, w.reset_7d);
+    }
+
+    // Stats strip
+    const statVals = card.querySelectorAll('.stat-cell .stat-val');
+    if (statVals[0]) statVals[0].textContent = w.last_check || '—';
+    if (statVals[1]) {
+      let burn = '';
+      if (ins.five_hour_burn) burn += `5h ${ins.five_hour_burn}`;
+      if (ins.seven_day_burn) burn += (burn ? ' · ' : '') + `7d ${ins.seven_day_burn}`;
+      statVals[1].textContent = burn || 'collecting…';
+    }
+    if (statVals[2]) statVals[2].textContent = ins.next_pause || '—';
+    if (statVals[3]) statVals[3].textContent = w.usage_source || '';
+
+    // Last reason (settings drawer summary)
+    const lr = card.querySelector('.last-reason');
+    if (lr) lr.textContent = w.last_reason || '';
+
+    // Auth + watcher buttons
+    const ar = card.querySelector('[data-actions-row]');
+    if (ar) updateActionButtons(ar, acct.status, w, br);
+  }
+
+  function updateMeter(el, pct, resetLabel) {
+    if (!el) return;
+    const pctEl   = el.querySelector('.m-pct');
+    const resetEl = el.querySelector('.m-reset');
+    const naEl    = el.querySelector('.m-na');
+    const fill    = el.querySelector('.progress-fill');
+    if (pct != null) {
+      if (pctEl)   { pctEl.textContent = pct.toFixed(1) + '%'; pctEl.hidden = false; }
+      if (resetEl) { resetEl.textContent = '↺ ' + (resetLabel || ''); resetEl.hidden = false; }
+      if (naEl)    naEl.hidden = true;
+      if (fill) {
+        fill.style.width = Math.min(100, pct) + '%';
+        const lvl = pct >= 95 ? 'danger' : pct >= 80 ? 'warn' : 'ok';
+        fill.className = `progress-fill progress-fill--${lvl}`;
+      }
+    } else {
+      if (pctEl)   pctEl.hidden = true;
+      if (resetEl) resetEl.hidden = true;
+      if (naEl)    { naEl.hidden = false; naEl.textContent = '—'; }
+      if (fill)    { fill.style.width = '0'; fill.className = 'progress-fill'; }
+    }
+  }
+
+  function updateActionButtons(ar, status, w, br) {
+    const isAuthed    = status === 'logged-in' || status === 'active';
+    const browserOpen = !!br.console_url;
+
+    // Login / Re-auth
+    const reAuth  = ar.querySelector('[data-btn-kind="reauth"]');
+    const openLgn = ar.querySelector('[data-btn-kind="open-login"]');
+    if (reAuth)  reAuth.hidden  = !isAuthed;
+    if (openLgn) openLgn.hidden = isAuthed;
+
+    // Browser-conditional buttons
+    const consoleLnk  = ar.querySelector('[data-browser-btn="console"]');
+    const finishForm  = ar.querySelector('[data-browser-btn="finish-form"]');
+    const closeForm   = ar.querySelector('[data-browser-btn="close-form"]');
+    if (consoleLnk) consoleLnk.hidden = !browserOpen;
+    if (finishForm) finishForm.hidden  = !browserOpen;
+    if (closeForm)  closeForm.hidden   = !browserOpen;
+
+    // Watcher enable / disable
+    const disableForm = ar.querySelector('[data-watcher-btn="disable"]');
+    const enableForm  = ar.querySelector('[data-watcher-btn="enable"]');
+    if (disableForm) disableForm.hidden = !w.enabled;
+    if (enableForm)  enableForm.hidden  = !!w.enabled;
+  }
+
+  // Start polling after initial render settles
+  setTimeout(poll, INTERVAL);
+})();
+</script>
+
+</body>
 </html>

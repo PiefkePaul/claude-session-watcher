@@ -654,6 +654,14 @@ class Store:
                 (int(enabled), utc_now(), session_id),
             )
 
+    def delete_session(self, session_id: int) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM claude_sessions WHERE id = ?", (session_id,))
+
+    def delete_account(self, account_id: int) -> None:
+        with self._connect() as conn:
+            conn.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
+
     def update_session_control_error(self, session_id: int, error: str | None) -> None:
         with self._connect() as conn:
             conn.execute(

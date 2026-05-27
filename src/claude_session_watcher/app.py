@@ -1,16 +1,18 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
 import secrets
+import shutil
 import traceback
 from contextlib import asynccontextmanager
 from ipaddress import ip_address
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
-from fastapi import FastAPI, Form, HTTPException, Request
+from fastapi import FastAPI, Form, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -286,6 +288,30 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         store.set_session_watch_enabled(session_id, False)
         return RedirectResponse("/", status_code=303)
 
+    @app.post("/sessions/{session_id}/delete")
+    async def delete_session(session_id: int):
+        store.delete_session(session_id)
+        return RedirectResponse("/", status_code=303)
+
+    @app.post("/accounts/{account_id}/delete")
+    async def delete_account(account_id: int):
+        account = store.get_account(account_id)
+        profile_dir = Path(account.profile_dir)
+        # 1. Close any open browser session for this profile
+        try:
+            await browser.close_profile(profile_dir)
+        except Exception:
+            pass
+        # 2. Remove DB rows (cascade: account_watchers, sessions, events, samples)
+        store.delete_account(account_id)
+        # 3. Wipe the profile directory (cookies, localStorage, IndexedDB, cache…)
+        try:
+            if profile_dir.exists() and profile_dir.is_dir():
+                shutil.rmtree(profile_dir, ignore_errors=True)
+        except Exception:
+            pass
+        return RedirectResponse("/", status_code=303)
+
     @app.post("/accounts/{account_id}/login")
     async def open_login(account_id: int):
         await _open_account_login(store, browser, display, account_id)
@@ -311,7 +337,6 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "account": account,
                 "wait": wait,
                 "auto_finish_login": settings.auto_finish_login,
-                "auto_start_google_login": settings.auto_start_google_login,
             },
         )
 
@@ -414,6 +439,52 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     async def health():
         return {"ok": True}
 
+    @app.get("/api/live")
+    async def api_live(request: Request):
+        """Lightweight live-poll endpoint — returns current state of all accounts for frontend."""
+        result = []
+        for account in store.list_accounts():
+            if account.id is None:
+                continue
+            aw = store.ensure_account_watcher(account.id)
+            sessions = store.list_sessions(account.id)
+            samples = store.list_usage_samples(aw.id)
+            insights = build_usage_insights(aw, samples)
+            ui = build_ui_watcher(aw)
+            bstate = await _browser_state(request, browser, display, settings, account)
+            result.append({
+                "id": account.id,
+                "status": account.status,
+                "watcher": {
+                    "id": aw.id,
+                    "enabled": aw.enabled,
+                    "state": aw.state,
+                    "five_hour": ui.five_hour.utilization,
+                    "seven_day": ui.seven_day.utilization,
+                    "reset_5h": ui.five_hour.reset_display,
+                    "reset_7d": ui.seven_day.reset_display,
+                    "last_check": ui.last_checked_display,
+                    "last_reason": aw.last_reason,
+                    "usage_source": _usage_source(aw.last_usage_json),
+                },
+                "insights": {
+                    "status": insights.status,
+                    "reason": insights.reason,
+                    "five_hour_burn": _format_burn(insights.five_hour_burn_per_hour),
+                    "seven_day_burn": _format_burn(insights.seven_day_burn_per_hour),
+                    "next_pause": format_timestamp(insights.next_pause_at),
+                },
+                "browser": {
+                    "browser_open": bstate["browser_open"],
+                    "login_detected": bstate["login_detected"],
+                    "console_url": bstate["console_url"],
+                    "display_enabled": bstate["display_enabled"],
+                },
+                "session_count": len(sessions),
+                "watched_count": sum(1 for s in sessions if s.watch_enabled),
+            })
+        return {"accounts": result}
+
     @app.get("/api/status")
     async def api_status():
         return {
@@ -432,6 +503,214 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.get("/api/accounts/{account_id}/sessions")
     async def api_account_sessions(account_id: int):
         return [_api_session(session) for session in store.list_sessions(account_id)]
+
+    @app.get("/api/accounts/{account_id}/browser-screenshot")
+    async def api_browser_screenshot(account_id: int, page_idx: int = -1):
+        """JPEG screenshot of the current browser page — used by the screenshot proxy console."""
+        account = store.get_account(account_id)
+        try:
+            data = await browser.screenshot(Path(account.profile_dir), page_index=page_idx)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        return Response(
+            content=data,
+            media_type="image/jpeg",
+            headers={"Cache-Control": "no-store, no-cache"},
+        )
+
+    @app.get("/api/accounts/{account_id}/browser-pages")
+    async def api_browser_pages(account_id: int):
+        """Returns info about all open browser pages (tabs) for this account."""
+        account = store.get_account(account_id)
+        return await browser.page_infos(Path(account.profile_dir))
+
+    @app.post("/api/accounts/{account_id}/browser-input")
+    async def api_browser_input(request: Request, account_id: int, page_idx: int = -1):
+        """Forward a mouse/keyboard event to the browser page (screenshot proxy)."""
+        account = store.get_account(account_id)
+        try:
+            event = await request.json()
+            await browser.send_input(Path(account.profile_dir), event, page_index=page_idx)
+        except Exception as exc:  # noqa: BLE001
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"ok": True}
+
+    @app.post("/api/accounts/{account_id}/fill-login")
+    async def api_fill_login(request: Request, account_id: int):
+        """Auto-fill an email/password login form in the active Camoufox page."""
+        account = store.get_account(account_id)
+        body = await request.json()
+        email = str(body.get("email", "")).strip()
+        password = str(body.get("password", "")).strip()
+        if not email or not password:
+            raise HTTPException(status_code=400, detail="email and password required")
+        result = await browser.fill_login_form(Path(account.profile_dir), email, password)
+        return result
+
+    @app.post("/api/accounts/{account_id}/start-email-login")
+    async def api_start_email_login(request: Request, account_id: int):
+        """Open Camoufox headless, navigate to login page, fill email, click Continue.
+
+        Body: {"email": "you@example.com"}
+        Returns the new login page state and current browser state.
+        """
+        account = store.get_account(account_id)
+        account_watcher = store.ensure_account_watcher(account_id)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="JSON body required")
+        email = str(body.get("email", "")).strip()
+        if not email:
+            raise HTTPException(status_code=400, detail="email required")
+        try:
+            result = await browser.start_email_login(Path(account.profile_dir), email)
+            level = "info" if result.get("ok") else "warning"
+            state = result.get("state", "unknown")
+            store.add_account_event(
+                account_watcher.id, level,
+                f"Email login started for {email} → state={state}",
+            )
+        except Exception as exc:
+            store.add_account_event(account_watcher.id, "error", f"Email login failed: {exc}")
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        bstate = await _browser_state(request, browser, display, settings, account)
+        return {**result, "browser": bstate}
+
+    @app.post("/api/accounts/{account_id}/submit-otp")
+    async def api_submit_otp(request: Request, account_id: int):
+        """Submit the 6-digit OTP verification code to the Camoufox browser.
+
+        Body: {"code": "123456"}
+        Returns the new login page state and current browser state.
+        """
+        account = store.get_account(account_id)
+        account_watcher = store.ensure_account_watcher(account_id)
+        try:
+            body = await request.json()
+        except Exception:
+            raise HTTPException(status_code=400, detail="JSON body required")
+        code = str(body.get("code", "")).strip()
+        if not code:
+            raise HTTPException(status_code=400, detail="code required")
+        try:
+            result = await browser.submit_otp(Path(account.profile_dir), code)
+            level = "info" if result.get("ok") else "warning"
+            state = result.get("state", "unknown")
+            store.add_account_event(
+                account_watcher.id, level,
+                f"OTP submitted → state={state}",
+            )
+        except Exception as exc:
+            store.add_account_event(account_watcher.id, "error", f"OTP submit failed: {exc}")
+            raise HTTPException(status_code=500, detail=str(exc)) from exc
+        bstate = await _browser_state(request, browser, display, settings, account)
+        return {**result, "browser": bstate}
+
+    @app.get("/api/accounts/{account_id}/login-page-state")
+    async def api_login_page_state(account_id: int):
+        """Return the current login page state for this account's browser.
+
+        Returns: {"state": "email_form"|"code_form"|"logged_in"|"new_account_setup"|
+                            "unknown"|"browser_closed"}
+        """
+        account = store.get_account(account_id)
+        return await browser.get_login_page_state(Path(account.profile_dir))
+
+    @app.post("/api/accounts/{account_id}/prewarm")
+    async def api_prewarm(account_id: int):
+        """Pre-open Camoufox headless in background to hide startup latency.
+
+        Safe to call fire-and-forget: no-op if browser is already open.
+        """
+        account = store.get_account(account_id)
+        return await browser.prewarm(Path(account.profile_dir))
+
+    @app.websocket("/ws/accounts/{account_id}/browser-stream")
+    async def browser_stream_ws(websocket: WebSocket, account_id: int):
+        """WebSocket browser stream: binary = JPEG frames, text in = JSON input events."""
+        await websocket.accept()
+        account = store.get_account(account_id)
+        profile_dir = Path(account.profile_dir)
+        running = True
+        prev_hash: int | None = None
+
+        async def push_frames() -> None:
+            nonlocal prev_hash
+            frame_count = 0
+            last_login_detected: bool = False
+            idle_streak = 0          # consecutive unchanged frames
+            _login_cache: tuple[bool, float] | None = None  # (value, monotonic_ts)
+            import time as _time
+
+            def cached_login_check() -> bool:
+                nonlocal _login_cache
+                # Cache has_session_key result for 1.5 s to avoid 12 file-reads/sec
+                now = _time.monotonic()
+                if _login_cache is not None and now - _login_cache[1] < 1.5:
+                    return _login_cache[0]
+                result = has_session_key(profile_dir)
+                _login_cache = (result, now)
+                return result
+
+            while running:
+                try:
+                    data = await browser.screenshot(profile_dir)
+                    fhash = hash(data[:256] + len(data).to_bytes(4, "big"))
+                    if fhash != prev_hash:
+                        await websocket.send_bytes(data)
+                        prev_hash = fhash
+                        idle_streak = 0
+                    else:
+                        idle_streak = min(idle_streak + 1, 30)
+
+                    frame_count += 1
+                    current_login = cached_login_check()
+                    # Invalidate login cache immediately on state change so detection
+                    # is instant (don't wait 1.5 s for the cache to expire).
+                    if current_login != last_login_detected:
+                        _login_cache = None
+                        current_login = cached_login_check()
+
+                    send_meta = current_login != last_login_detected or frame_count % 6 == 0
+                    if send_meta:
+                        last_login_detected = current_login
+                        meta: dict[str, object] = {"login_detected": current_login}
+                        if frame_count % 6 == 0:
+                            meta["pages"] = await browser.page_infos(profile_dir)
+                        await websocket.send_text(json.dumps(meta))
+                except WebSocketDisconnect:
+                    break
+                except Exception:
+                    pass
+
+                # Adaptive frame rate:
+                #   ≥5 consecutive identical frames → drop to ~3 fps (saves CPU)
+                #   Any change                      → snap back to ~12 fps
+                await asyncio.sleep(1 / 3 if idle_streak >= 5 else 1 / 12)
+
+        frame_task = asyncio.create_task(push_frames())
+        try:
+            while True:
+                raw = await websocket.receive_text()
+                msg = json.loads(raw)
+                if msg.get("t") == "input":
+                    page_idx = int(msg.get("p", -1))
+                    try:
+                        await browser.send_input(
+                            profile_dir, msg["d"], page_index=page_idx
+                        )
+                    except Exception:
+                        pass
+        except WebSocketDisconnect:
+            pass
+        finally:
+            running = False
+            frame_task.cancel()
+            try:
+                await frame_task
+            except asyncio.CancelledError:
+                pass
 
     @app.get("/api/accounts/{account_id}/browser-state")
     async def api_account_browser_state(request: Request, account_id: int):

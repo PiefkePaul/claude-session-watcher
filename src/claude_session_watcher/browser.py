@@ -228,10 +228,7 @@ class CamoufoxManager:
         # - /new reliably shows the profile/plan picker (needed when the user has both Free/Pro)
         # - /code can redirect to /code/disabled before the user can switch plans
         page = await self._get_or_open_page(context, "https://claude.ai/new")
-        if not page.url.startswith("https://claude.ai/"):
-            await page.goto("https://claude.ai/new", wait_until="domcontentloaded")
-        else:
-            await page.goto("https://claude.ai/new", wait_until="domcontentloaded")
+        await page.goto("https://claude.ai/new", wait_until="domcontentloaded")
         try:
             await page.bring_to_front()
         except Exception:
@@ -516,6 +513,7 @@ class CamoufoxManager:
     async def _accept_cookies_banner(page) -> None:
         # Best-effort: the cookie banner can block clicks, especially on first use.
         candidates = [
+            '[data-testid="consent-accept"]',
             "text=Alle Cookies akzeptieren",
             "text=Accept all cookies",
             "text=Accept all",
@@ -811,10 +809,520 @@ class CamoufoxManager:
         if not has_sessions:
             await self.display_manager.stop()
 
+    # ──────────────────────────────────────────────────────────────
+    # Screenshot proxy — replaces VNC for the login UI
+    # ──────────────────────────────────────────────────────────────
+
+    async def screenshot(self, profile_dir: Path, *, page_index: int = -1) -> bytes:
+        """Return a JPEG screenshot of the specified browser page (default: last/newest).
+
+        Raises BrowserError immediately if the profile is not already open — this prevents
+        the WebSocket stream from accidentally launching a new headless browser.
+        """
+        if not await self.is_profile_open(profile_dir):
+            raise BrowserError("Browser is not open for this profile")
+        context = await self.context_for_profile(profile_dir)
+        pages = context.pages
+        if not pages:
+            raise BrowserError("No browser pages open for this profile")
+        try:
+            page = pages[page_index % len(pages)]
+        except (IndexError, ZeroDivisionError):
+            page = pages[-1]
+        return await page.screenshot(type="jpeg", quality=80, full_page=False)
+
+    async def page_infos(self, profile_dir: Path) -> list[dict[str, Any]]:
+        """Return info (index, url, title) for all open pages of this profile."""
+        if not await self.is_profile_open(profile_dir):
+            return []
+        try:
+            context = await self.context_for_profile(profile_dir)
+        except Exception:
+            return []
+        infos = []
+        for i, page in enumerate(context.pages):
+            try:
+                title = await page.title()
+            except Exception:
+                title = ""
+            infos.append({"index": i, "url": page.url or "", "title": title})
+        return infos
+
+    async def send_input(
+        self,
+        profile_dir: Path,
+        event: dict[str, Any],
+        *,
+        page_index: int = -1,
+    ) -> None:
+        """Forward a mouse/keyboard event to the browser page.
+
+        Supported event types:
+          click   – {type, x, y}              mouse left-click at page coordinates
+          dblclick– {type, x, y}              double-click
+          key     – {type, key}               keyboard.press() (special keys, combos)
+          type    – {type, text}              keyboard.type() (printable characters)
+          scroll  – {type, dx, dy}            mouse wheel delta
+        """
+        context = await self.context_for_profile(profile_dir)
+        pages = context.pages
+        if not pages:
+            raise BrowserError("No browser pages open for this profile")
+        try:
+            page = pages[page_index % len(pages)]
+        except (IndexError, ZeroDivisionError):
+            page = pages[-1]
+
+        etype = event.get("type")
+        if etype == "click":
+            await page.mouse.click(float(event["x"]), float(event["y"]))
+        elif etype == "dblclick":
+            await page.mouse.dblclick(float(event["x"]), float(event["y"]))
+        elif etype == "key":
+            key = str(event.get("key", ""))
+            if key:
+                await page.keyboard.press(key)
+        elif etype == "type":
+            text = str(event.get("text", ""))
+            if text:
+                await page.keyboard.type(text)
+        elif etype == "scroll":
+            await page.mouse.wheel(float(event.get("dx", 0)), float(event.get("dy", 0)))
+
+    async def fill_login_form(
+        self,
+        profile_dir: Path,
+        email: str,
+        password: str,
+    ) -> dict[str, Any]:
+        """Best-effort: find and fill an email+password login form in the active page."""
+        context = await self.context_for_profile(profile_dir)
+        pages = context.pages
+        if not pages:
+            return {"ok": False, "reason": "No browser pages open"}
+
+        # Prefer a claude.ai page, otherwise use last page
+        login_page = next(
+            (p for p in reversed(pages) if "claude.ai" in (p.url or "")),
+            pages[-1],
+        )
+
+        email_selectors = [
+            "input[type='email']",
+            "input[name='email']",
+            "input[id*='email']",
+            "input[placeholder*='email' i]",
+        ]
+        filled_email = False
+        for sel in email_selectors:
+            try:
+                el = login_page.locator(sel).first
+                await el.wait_for(state="visible", timeout=2_000)
+                await el.fill(email)
+                filled_email = True
+                break
+            except Exception:
+                continue
+
+        if not filled_email:
+            return {"ok": False, "reason": "Email field not found on current page"}
+
+        filled_password = False
+        try:
+            pw_el = login_page.locator("input[type='password']").first
+            await pw_el.wait_for(state="visible", timeout=3_000)
+            await pw_el.fill(password)
+            filled_password = True
+        except Exception:
+            pass
+
+        try:
+            await login_page.keyboard.press("Enter")
+        except Exception:
+            pass
+
+        return {
+            "ok": filled_email,
+            "filled_email": filled_email,
+            "filled_password": filled_password,
+        }
+
+    async def _navigate_to_login(self, context) -> Any:
+        """Navigate to claude.ai/login robustly.
+
+        Handles the two common Camoufox/Gecko startup failure modes:
+
+        NS_BINDING_ABORTED  — Firefox aborted our goto() because the browser was already
+                              mid-navigation (another tab was loading, or Camoufox's own
+                              startup navigation was running).  The page may have ended up
+                              somewhere useful anyway — we check the URL afterwards and
+                              return the page if it's on claude.ai rather than retrying.
+
+        Target/context closed — the initial about:blank Page object was replaced during
+                              browser startup.  We sleep and retry with a fresh reference.
+
+        After all retries: instead of raising, return whatever claude.ai page we have so
+        the caller can decide based on the actual page state.
+        """
+        last_exc: Exception | None = None
+
+        for attempt in range(4):
+            # Always re-fetch page reference to avoid stale objects
+            pages = context.pages
+            if pages:
+                page = next(
+                    (p for p in pages if "claude.ai" in (p.url or "")),
+                    pages[-1],
+                )
+            else:
+                page = await context.new_page()
+
+            current_url = page.url or ""
+
+            # Already on the login page — no navigation needed
+            if "claude.ai/login" in current_url:
+                return page
+
+            # Already elsewhere on claude.ai — but NOT /new.
+            # /new is excluded because open_login() navigates there with
+            # wait_until=domcontentloaded, so the URL may still be /new for
+            # unauthenticated users BEFORE React's client-side redirect fires.
+            # Returning early for /new would bypass the /login navigation and
+            # cause _detect_login_state to see an empty page (→ unknown or worse,
+            # false logged_in in older code).  For all other claude.ai paths
+            # (e.g. /chat/…, /code) this early return is safe — they are only
+            # reachable for authenticated sessions.
+            if (
+                "claude.ai" in current_url
+                and "/new" not in current_url
+                and current_url not in ("about:blank", "about:newtab", "")
+            ):
+                return page
+
+            try:
+                await page.goto("https://claude.ai/login", wait_until="domcontentloaded")
+                return page
+            except Exception as exc:
+                last_exc = exc
+                msg = str(exc).lower()
+
+                # NS_BINDING_ABORTED: Gecko aborted our goto() — browser was already
+                # navigating internally.  Wait, then check if we landed somewhere useful.
+                if "ns_binding" in msg or "binding_aborted" in msg or "aborted" in msg:
+                    await asyncio.sleep(1.2)
+                    pages = context.pages
+                    if pages:
+                        p = next((p for p in pages if "claude.ai" in (p.url or "")), pages[-1])
+                        if "claude.ai" in (p.url or ""):
+                            return p  # Browser got there on its own
+                    if attempt < 3:
+                        await asyncio.sleep(1.0)
+                        continue
+                    break
+
+                # Target/context closed: browser still in startup — retry
+                if "closed" in msg or "target" in msg or "browser has been closed" in msg:
+                    if attempt < 3:
+                        await asyncio.sleep(2.0)
+                        continue
+                    break
+
+                # Any other error: stop immediately
+                break
+
+        # All retries exhausted — return whatever claude.ai page we have rather than
+        # raising: the caller will detect the actual state via _detect_login_state.
+        pages = context.pages
+        if pages:
+            best = next((p for p in pages if "claude.ai" in (p.url or "")), pages[-1])
+            return best
+        raise BrowserError(
+            f"Could not navigate to claude.ai/login and no browser pages available: {last_exc}"
+        )
+
+    async def prewarm(self, profile_dir: Path) -> dict[str, Any]:
+        """Pre-open the Camoufox browser process without navigating anywhere.
+
+        Call this in the background as soon as the user starts interacting with the
+        login form so the Firefox startup time is hidden behind their typing latency.
+        """
+        try:
+            context = await self.context_for_profile(profile_dir, headless=True, reset=False)
+            return {"ok": True, "pages": len(context.pages)}
+        except Exception as exc:
+            return {"ok": False, "reason": str(exc)}
+
+    async def start_email_login(self, profile_dir: Path, email: str) -> dict[str, Any]:
+        """Start the email OTP login flow via Camoufox (headless).
+
+        Opens the browser if not already open, navigates to the Claude login page,
+        accepts the cookie banner, fills the email field, and clicks Continue.
+
+        Returns dict with:
+          ok:    bool
+          state: 'code_form' | 'logged_in' | 'new_account_setup' | 'email_form' | 'unknown'
+          reason: (str, only when ok=False)
+        """
+        context = await self.context_for_profile(profile_dir, headless=True, reset=False)
+
+        # ── Pre-flight: skip navigation if browser is already on the OTP step ──
+        # Handles double-submits and NS_BINDING_ABORTED cases where the previous
+        # call raised but the browser had already progressed to code_form.
+        #
+        # NOTE: we do NOT short-circuit for logged_in here.  The profile may
+        # contain a stale session-key file whose cookie has since expired, or the
+        # browser was opened by prewarm but hasn't navigated yet.  By proceeding
+        # with _navigate_to_login we let Claude itself validate the session:
+        # a valid cookie will redirect to the main page (detected post-nav as
+        # logged_in), an expired one will show the login form (→ OTP flow).
+        for p in list(context.pages):
+            try:
+                pre_state = await self._detect_login_state(p)
+            except Exception:
+                continue
+            if pre_state == "code_form":
+                return {"ok": True, "state": "code_form"}
+            if pre_state == "new_account_setup":
+                return {"ok": False, "state": "new_account_setup",
+                        "reason": "new_account_setup"}
+
+        # ── Navigate to login page ────────────────────────────────────────────
+        # Gracefully handles NS_BINDING_ABORTED and target-closed races.
+        try:
+            page = await self._navigate_to_login(context)
+        except Exception as exc:
+            return {"ok": False, "reason": f"Could not open login page: {exc}"}
+
+        # ── Post-nav state check ──────────────────────────────────────────────
+        # _navigate_to_login may return a page already past email_form when the
+        # browser navigated autonomously while our goto() was being aborted.
+        post_nav_state = await self._detect_login_state(page)
+        if post_nav_state == "code_form":
+            return {"ok": True, "state": "code_form"}
+        if post_nav_state == "logged_in":
+            return {"ok": True, "state": "logged_in"}
+        if post_nav_state == "new_account_setup":
+            return {"ok": False, "state": "new_account_setup",
+                    "reason": "new_account_setup"}
+
+        await self._accept_cookies_banner(page)
+
+        # ── Fill email field ──────────────────────────────────────────────────
+        # Camoufox humanize=True types char-by-char — JS-clear first to prevent
+        # appending to existing content on retry.
+        try:
+            email_el = page.locator('[data-testid="email"]').first
+            await email_el.wait_for(state="visible", timeout=20_000)
+            await email_el.evaluate(
+                "el => { el.value = ''; el.dispatchEvent(new Event('input', {bubbles:true})); }"
+            )
+            await email_el.fill(email)
+        except Exception as exc:
+            # Last-chance state check before giving up
+            fallback = await self._detect_login_state(page)
+            if fallback in ("code_form", "logged_in"):
+                return {"ok": True, "state": fallback}
+            return {"ok": False, "reason": f"Email field not found on login page: {exc}"}
+
+        # ── Click Continue ────────────────────────────────────────────────────
+        try:
+            continue_btn = page.locator('[data-testid="continue"]').first
+            await continue_btn.wait_for(state="visible", timeout=10_000)
+            await continue_btn.click()
+        except Exception as exc:
+            fallback = await self._detect_login_state(page)
+            if fallback in ("code_form", "logged_in"):
+                return {"ok": True, "state": fallback}
+            return {"ok": False, "reason": f"Continue button not found: {exc}"}
+
+        # ── Wait for state transition ─────────────────────────────────────────
+        state = await self._wait_for_login_state_change(
+            page, from_state="email_form", timeout_ms=25_000
+        )
+        return {"ok": True, "state": state}
+
+    async def submit_otp(self, profile_dir: Path, code: str) -> dict[str, Any]:
+        """Submit the 6-digit OTP verification code to the Camoufox browser.
+
+        Expects the browser to be open and already on the code-entry step
+        (after start_email_login completed with state='code_form').
+
+        Returns dict with:
+          ok:    bool
+          state: 'logged_in' | 'new_account_setup' | 'code_form' | 'unknown'
+          reason: (str, only when ok=False)
+        """
+        if not await self.is_profile_open(profile_dir):
+            return {"ok": False, "reason": "Browser is not open. Call start_email_login first."}
+
+        context = await self.context_for_profile(profile_dir)
+        pages = context.pages
+        if not pages:
+            return {"ok": False, "reason": "No browser pages open"}
+
+        # Prefer a claude.ai page
+        login_page = next(
+            (p for p in reversed(pages) if "claude.ai" in (p.url or "")),
+            pages[-1],
+        )
+
+        # Pre-flight state check — avoid the confusing timeout error when we're already
+        # past the code entry step (e.g. new account redirected to onboarding).
+        current_state = await self._detect_login_state(login_page)
+        if current_state == "new_account_setup":
+            return {"ok": False, "state": "new_account_setup",
+                    "reason": "new_account_setup"}
+        if current_state == "logged_in":
+            return {"ok": True, "state": "logged_in"}
+
+        # Fill the 6-digit code
+        cleaned = code.strip()[:6]
+        try:
+            code_el = login_page.locator('[data-testid="code"]').first
+            await code_el.wait_for(state="visible", timeout=5_000)
+            # JS-clear first (same humanize-safe approach as email field)
+            await code_el.evaluate(
+                "el => { el.value = ''; el.dispatchEvent(new Event('input', {bubbles:true})); }"
+            )
+            await code_el.fill(cleaned)
+        except Exception as exc:
+            current = await self._detect_login_state(login_page)
+            return {
+                "ok": False,
+                "state": current,
+                "reason": f"Code input not found (state: {current}): {exc}",
+            }
+
+        # Click Continue / submit
+        submitted = False
+        try:
+            continue_btn = login_page.locator('[data-testid="continue"]').first
+            await continue_btn.wait_for(state="visible", timeout=3_000)
+            await continue_btn.click()
+            submitted = True
+        except Exception:
+            # Fallback: press Enter
+            try:
+                await login_page.keyboard.press("Enter")
+                submitted = True
+            except Exception:
+                pass
+
+        if not submitted:
+            return {"ok": False, "reason": "Could not find Continue button to submit code"}
+
+        # Wait for state change
+        state = await self._wait_for_login_state_change(
+            login_page, from_state="code_form", timeout_ms=12_000
+        )
+        return {"ok": True, "state": state}
+
+    async def get_login_page_state(self, profile_dir: Path) -> dict[str, Any]:
+        """Return the current login page state for this profile.
+
+        Returns dict with:
+          state: 'email_form' | 'code_form' | 'logged_in' | 'new_account_setup'
+                 | 'unknown' | 'browser_closed'
+        """
+        if not await self.is_profile_open(profile_dir):
+            return {"state": "browser_closed"}
+
+        try:
+            context = await self.context_for_profile(profile_dir)
+        except Exception:
+            return {"state": "browser_closed"}
+
+        pages = context.pages
+        if not pages:
+            return {"state": "browser_closed"}
+
+        # Quick check via cookies first
+        try:
+            cookies = await context.cookies("https://claude.ai")
+            if any(c.get("name") == "sessionKey" and c.get("value") for c in cookies):
+                return {"state": "logged_in"}
+        except Exception:
+            pass
+
+        # Find claude.ai page
+        login_page = next(
+            (p for p in reversed(pages) if "claude.ai" in (p.url or "")),
+            pages[-1],
+        )
+        state = await self._detect_login_state(login_page)
+        return {"state": state}
+
+    async def _detect_login_state(self, page) -> str:
+        """Read the current DOM/URL to determine which step of the login flow we're on."""
+        try:
+            result = await page.evaluate(
+                """
+                () => {
+                    // OTP code entry step
+                    if (document.querySelector('[data-testid="code"]')) return 'code_form';
+                    // Email entry step
+                    if (document.querySelector('[data-testid="email"]')) return 'email_form';
+                    // Logged in: user menu is present in the DOM.
+                    // NOTE: Do NOT use URL patterns like /new or /code to infer logged_in.
+                    // open_login() navigates to /new with wait_until=domcontentloaded, so the
+                    // URL may be /new BEFORE React's client-side redirect to /login fires for
+                    // unauthenticated users.  URL-based detection causes false logged_in for
+                    // brand-new accounts and is not needed — the user-menu selector is the
+                    // reliable indicator.
+                    if (document.querySelector('[data-testid="user-menu-button"]')) return 'logged_in';
+                    // New account onboarding
+                    const text = (document.body ? document.body.innerText : '').toLowerCase();
+                    if (text.includes('how do you plan') || text.includes('tell us about yourself')
+                        || text.includes('create your account') || text.includes('onboarding')) {
+                        return 'new_account_setup';
+                    }
+                    // Login page URL
+                    if (window.location.href.includes('/login')) return 'email_form';
+                    return 'unknown';
+                }
+                """
+            )
+            return str(result) if result else "unknown"
+        except Exception:
+            return "unknown"
+
+    async def _wait_for_login_state_change(
+        self,
+        page,
+        *,
+        from_state: str,
+        timeout_ms: int = 10_000,
+    ) -> str:
+        """Poll the page until the login state changes away from `from_state`.
+
+        Transient 'unknown' states (React mid-navigation, page loading) are
+        skipped — we keep waiting until a meaningful state is reached so callers
+        never get a spurious 'unknown' return from a page that is still rendering.
+        """
+        start = asyncio.get_event_loop().time()
+        deadline = start + timeout_ms / 1000
+        while asyncio.get_event_loop().time() < deadline:
+            state = await self._detect_login_state(page)
+            if state != from_state and state != "unknown":
+                return state
+            await asyncio.sleep(0.4)
+        # Timed out — return whatever state we're in now (including unknown)
+        return await self._detect_login_state(page)
+
     async def _get_or_open_page(self, context, remote_url: str):
-        for page in context.pages:
+        pages = context.pages
+        # 1. Prefer a page already at (or near) the target URL.
+        for page in pages:
             if remote_url in page.url or page.url in remote_url:
                 return page
+        # 2. Reuse a blank/empty page rather than spawning a redundant window.
+        #    Camoufox opens with an initial about:blank tab; without this check
+        #    every call would create an additional window.
+        for page in pages:
+            url = page.url or ""
+            if url in ("about:blank", "about:newtab", ""):
+                return page
+        # 3. No suitable page found — open a new one.
         return await context.new_page()
 
     async def _find_prompt_editor(self, page):
