@@ -18,6 +18,20 @@ class StaticLimitProvider:
         return UsageFetchResult(snapshot=snapshot, source="test")
 
 
+class SequenceLimitProvider:
+    def __init__(self, snapshots):
+        self.snapshots = [ClaudeUsageClient._parse(payload) for payload in snapshots]
+        self.index = 0
+
+    async def fetch(self, account):
+        if self.index >= len(self.snapshots):
+            snapshot = self.snapshots[-1]
+        else:
+            snapshot = self.snapshots[self.index]
+            self.index += 1
+        return UsageFetchResult(snapshot=snapshot, source="test-seq")
+
+
 class RecordingController:
     def __init__(self):
         self.sent = []
@@ -78,3 +92,113 @@ async def test_service_sends_only_to_selected_sessions(tmp_path):
     samples = store.list_usage_samples(account_watcher.id)
     assert samples[0].source == "test"
     assert samples[0].five_hour_utilization == 99.0
+
+
+@pytest.mark.asyncio
+async def test_service_continues_all_selected_sessions(tmp_path):
+    store = Store(tmp_path / "watcher.sqlite3")
+    account = store.create_account("work", str(tmp_path / "profile"))
+    account_watcher = store.ensure_account_watcher(account.id)
+    session_a = store.upsert_session(
+        ClaudeSession(
+            id=None,
+            account_id=account.id,
+            session_key="session_a",
+            title="session-a",
+            url="https://claude.ai/code/session_a",
+            kind="remote",
+            status="active",
+            watch_enabled=True,
+            control_supported=True,
+        )
+    )
+    session_b = store.upsert_session(
+        ClaudeSession(
+            id=None,
+            account_id=account.id,
+            session_key="session_b",
+            title="session-b",
+            url="https://claude.ai/code/session_b",
+            kind="remote",
+            status="active",
+            watch_enabled=True,
+            control_supported=True,
+        )
+    )
+    controller = RecordingController()
+    provider = SequenceLimitProvider(
+        [
+            {"five_hour": {"utilization": 99.0, "resets_at": None}},
+            {"five_hour": {"utilization": 10.0, "resets_at": None}},
+        ]
+    )
+    service = WatcherService(
+        store,
+        browser=None,
+        settings=object(),
+        usage_provider=provider,
+        session_controller=controller,
+    )
+
+    pause_result = await service.check_account_now(account_watcher.id)
+    continue_result = await service.check_account_now(account_watcher.id)
+
+    assert pause_result == "paused"
+    assert continue_result == "continued"
+    assert controller.sent == [
+        ("session_a", account_watcher.pause_message),
+        ("session_b", account_watcher.pause_message),
+        ("session_a", account_watcher.continue_message),
+        ("session_b", account_watcher.continue_message),
+    ]
+    assert store.get_session(session_a.id).last_control_error is None
+    assert store.get_session(session_b.id).last_control_error is None
+
+
+@pytest.mark.asyncio
+async def test_service_attempts_archived_selected_sessions(tmp_path):
+    store = Store(tmp_path / "watcher.sqlite3")
+    account = store.create_account("work", str(tmp_path / "profile"))
+    account_watcher = store.ensure_account_watcher(account.id)
+    store.upsert_session(
+        ClaudeSession(
+            id=None,
+            account_id=account.id,
+            session_key="session_active",
+            title="active",
+            url="https://claude.ai/code/session_active",
+            kind="remote",
+            status="active",
+            watch_enabled=True,
+            control_supported=True,
+        )
+    )
+    store.upsert_session(
+        ClaudeSession(
+            id=None,
+            account_id=account.id,
+            session_key="session_archived",
+            title="archived",
+            url="https://claude.ai/code/session_archived",
+            kind="remote",
+            status="archived",
+            watch_enabled=True,
+            control_supported=True,
+        )
+    )
+    controller = RecordingController()
+    service = WatcherService(
+        store,
+        browser=None,
+        settings=object(),
+        usage_provider=StaticLimitProvider(),
+        session_controller=controller,
+    )
+
+    result = await service.check_account_now(account_watcher.id)
+
+    assert result == "paused"
+    assert controller.sent == [
+        ("session_active", account_watcher.pause_message),
+        ("session_archived", account_watcher.pause_message),
+    ]

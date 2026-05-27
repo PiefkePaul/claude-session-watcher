@@ -196,27 +196,48 @@ class WatcherService:
                 level="warning",
             )
             return
+        attempted = 0
+        succeeded = 0
+        failed = 0
+        skipped = 0
         for session in sessions:
             if session.id is None:
                 continue
-            if session.status in {"archived", "offline"} or not session.control_supported:
+            if not session.control_supported:
+                skipped += 1
                 self.store.add_account_event(
                     watcher.id,
                     "warning",
-                    f"Skipped unavailable session: {session.title}",
+                    f"Skipped uncontrollable session: {session.title}",
                     session_id=session.id,
                 )
                 await self._notify(
                     "session_skipped",
                     "Claude session skipped",
-                    f"Skipped unavailable session: {session.title}",
+                    f"Skipped uncontrollable session: {session.title}",
                     level="warning",
                 )
                 continue
+            attempted += 1
+            if session.status in {"archived", "offline"}:
+                self.store.add_account_event(
+                    watcher.id,
+                    "warning",
+                    f"Session marked {session.status}; trying anyway: {session.title}",
+                    session_id=session.id,
+                )
             try:
                 await self.session_controller.send_to_session(account, session, message)
                 self.store.update_session_control_error(session.id, None)
+                succeeded += 1
+                self.store.add_account_event(
+                    watcher.id,
+                    "info",
+                    f"Command sent to session: {session.title}",
+                    session_id=session.id,
+                )
             except Exception as exc:  # noqa: BLE001 - keep other sessions controllable
+                failed += 1
                 self.store.update_session_control_error(session.id, str(exc))
                 self.store.add_account_event(
                     watcher.id,
@@ -230,6 +251,14 @@ class WatcherService:
                     f"Could not control session {session.title}: {exc}",
                     level="error",
                 )
+        self.store.add_account_event(
+            watcher.id,
+            "info",
+            (
+                f"Dispatch summary: selected={len(sessions)}, attempted={attempted}, "
+                f"succeeded={succeeded}, failed={failed}, skipped={skipped}"
+            ),
+        )
 
     async def _notify(self, event_type: str, title: str, message: str, *, level: str) -> None:
         try:
