@@ -126,21 +126,34 @@ def _burn_rate_per_hour(samples: list[UsageSample], key: str) -> float | None:
     if latest_created is None or latest_value is None:
         return None
 
-    candidates: list[UsageSample] = []
+    same_reset_candidates: list[UsageSample] = []
+    fallback_candidates: list[UsageSample] = []
     for sample in samples:
         if sample.id == latest.id:
             continue
-        if _sample_value(sample, key) is None:
-            continue
-        if _sample_reset(sample, key) != latest_reset:
+        sample_value = _sample_value(sample, key)
+        if sample_value is None:
             continue
         created = _parse_dt(sample.created_at)
-        if created and created < latest_created:
-            candidates.append(sample)
-    if not candidates:
+        if created is None or created >= latest_created:
+            continue
+        if _sample_reset(sample, key) == latest_reset and latest_reset:
+            same_reset_candidates.append(sample)
+        if sample_value <= latest_value:
+            fallback_candidates.append(sample)
+
+    # Preferred baseline: oldest sample in the same reset window.
+    baseline: UsageSample | None = None
+    if same_reset_candidates:
+        baseline = same_reset_candidates[0]
+    # Fallback for rolling windows where reset timestamps can move between checks.
+    # Use the closest prior sample that is <= latest utilization to avoid
+    # crossing a hard drop/reset boundary.
+    elif fallback_candidates:
+        baseline = fallback_candidates[-1]
+    if baseline is None:
         return None
 
-    baseline = candidates[0]
     baseline_created = _parse_dt(baseline.created_at)
     baseline_value = _sample_value(baseline, key)
     if baseline_created is None or baseline_value is None:
