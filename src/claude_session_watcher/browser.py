@@ -1102,8 +1102,7 @@ class CamoufoxManager:
         if post_nav_state == "logged_in":
             return {"ok": True, "state": "logged_in"}
         if post_nav_state == "new_account_setup":
-            return {"ok": False, "state": "new_account_setup",
-                    "reason": "new_account_setup"}
+            return {"ok": False, "state": "new_account_setup", "reason": "new_account_setup"}
 
         await self._accept_cookies_banner(page)
 
@@ -1111,8 +1110,21 @@ class CamoufoxManager:
         # Camoufox humanize=True types char-by-char — JS-clear first to prevent
         # appending to existing content on retry.
         try:
-            email_el = page.locator('[data-testid="email"]').first
-            await email_el.wait_for(state="visible", timeout=20_000)
+            email_el = await self._find_email_input(page, timeout_ms=10_000)
+            if email_el is None:
+                await self._open_email_login_step(page)
+                email_el = await self._find_email_input(page, timeout_ms=12_000)
+            if email_el is None:
+                fallback = await self._detect_login_state(page)
+                url = (page.url or "").strip()
+                return {
+                    "ok": False,
+                    "state": fallback,
+                    "reason": (
+                        "Email field not found on login page. "
+                        f"state={fallback} url={url}"
+                    ),
+                }
             await email_el.evaluate(
                 "el => { el.value = ''; el.dispatchEvent(new Event('input', {bubbles:true})); }"
             )
@@ -1126,9 +1138,9 @@ class CamoufoxManager:
 
         # ── Click Continue ────────────────────────────────────────────────────
         try:
-            continue_btn = page.locator('[data-testid="continue"]').first
-            await continue_btn.wait_for(state="visible", timeout=10_000)
-            await continue_btn.click()
+            clicked = await self._click_continue_button(page, timeout_ms=10_000)
+            if not clicked:
+                raise BrowserError("continue button not found")
         except Exception as exc:
             fallback = await self._detect_login_state(page)
             if fallback in ("code_form", "logged_in"):
@@ -1139,7 +1151,151 @@ class CamoufoxManager:
         state = await self._wait_for_login_state_change(
             page, from_state="email_form", timeout_ms=25_000
         )
+        if state == "email_form":
+            error_text = await self._extract_login_error(page)
+            if error_text:
+                return {
+                    "ok": False,
+                    "state": "email_form",
+                    "reason": self._classify_login_error(error_text),
+                }
+            return {
+                "ok": False,
+                "state": "email_form",
+                "reason": "Email was not accepted on the login form.",
+            }
         return {"ok": True, "state": state}
+
+    async def _find_email_input(self, page, *, timeout_ms: int = 8_000):
+        selectors = [
+            '[data-testid="email"]',
+            "input[type='email']",
+            "input[name='email']",
+            "input[id*='email']",
+            "input[autocomplete='email']",
+            "input[placeholder*='email' i]",
+            "input[placeholder*='e-mail' i]",
+        ]
+        for selector in selectors:
+            try:
+                locator = page.locator(selector).first
+                await locator.wait_for(state="visible", timeout=timeout_ms)
+                return locator
+            except Exception:
+                continue
+        return None
+
+    async def _open_email_login_step(self, page) -> None:
+        candidates = [
+            'button:has-text("Continue with email")',
+            'button:has-text("Continue with Email")',
+            'button:has-text("Continue with e-mail")',
+            'button:has-text("Mit E-Mail fortfahren")',
+            'button:has-text("E-Mail")',
+            'a:has-text("Continue with email")',
+            'a:has-text("Mit E-Mail fortfahren")',
+        ]
+        for selector in candidates:
+            try:
+                locator = page.locator(selector).first
+                if await locator.count() and await locator.is_visible():
+                    await locator.click(timeout=3_000)
+                    await page.wait_for_timeout(400)
+                    return
+            except Exception:
+                continue
+
+    async def _click_continue_button(self, page, *, timeout_ms: int = 10_000) -> bool:
+        candidates = [
+            '[data-testid="continue"]',
+            'button:has-text("Continue")',
+            'button:has-text("Weiter")',
+            'button:has-text("Sign in")',
+            'button:has-text("Anmelden")',
+        ]
+        for selector in candidates:
+            try:
+                locator = page.locator(selector).first
+                await locator.wait_for(state="visible", timeout=timeout_ms)
+                await locator.click(timeout=3_000)
+                return True
+            except Exception:
+                continue
+        try:
+            await page.keyboard.press("Enter")
+            return True
+        except Exception:
+            return False
+
+    async def _extract_login_error(self, page) -> str | None:
+        """Best-effort extraction of visible login-form errors after email submit."""
+        try:
+            raw = await page.evaluate(
+                """
+                () => {
+                    const root = document.body;
+                    if (!root) return "";
+
+                    const blocks = [];
+                    const selectors = [
+                        '[role="alert"]',
+                        '[aria-live="assertive"]',
+                        '[aria-live="polite"]',
+                        '[data-testid*="error"]',
+                        '[data-error]',
+                        '[aria-invalid="true"]',
+                        'p',
+                        'div',
+                        'span',
+                    ];
+                    const seen = new Set();
+                    const terms = /(error|invalid|domain|disposable|temporary|not available|new users|trouble sending|cannot send|can't send|email)/i;
+                    for (const selector of selectors) {
+                        for (const node of document.querySelectorAll(selector)) {
+                            const text = (node.innerText || "").trim();
+                            if (!text) continue;
+                            if (text.length > 300) continue;
+                            if (!terms.test(text)) continue;
+                            const key = text.toLowerCase();
+                            if (seen.has(key)) continue;
+                            seen.add(key);
+                            // Avoid noisy parent containers with repeated CTA text.
+                            if (text.length > 180) continue;
+                            blocks.push(text.replace(/\\s+/g, ' ').trim());
+                            if (blocks.length >= 4) {
+                                return blocks.join(" | ");
+                            }
+                        }
+                    }
+                    return blocks.join(" | ");
+                }
+                """
+            )
+        except Exception:
+            return None
+        text = str(raw or "").strip()
+        return text or None
+
+    def _classify_login_error(self, text: str) -> str:
+        fragment = text.split("|", 1)[0].strip()
+        fragment_lower = fragment.lower()
+        lower = text.lower()
+        if (
+            "disposable" in lower
+            or "temporary" in lower
+            or "domain rejected" in lower
+            or "email domain" in lower
+        ):
+            return "Disposable/temporary email domains are rejected by Claude."
+        if "not available to new users" in lower or "new users" in lower:
+            return "Claude does not allow creating a new account for this email right now."
+        if "trouble sending" in lower or "cannot send" in lower or "can't send" in lower:
+            return "Claude could not send a login email to this address."
+        if fragment:
+            return fragment
+        if fragment_lower:
+            return fragment_lower
+        return text
 
     async def submit_otp(self, profile_dir: Path, code: str) -> dict[str, Any]:
         """Submit the 6-digit OTP verification code to the Camoufox browser.
@@ -1213,8 +1369,14 @@ class CamoufoxManager:
 
         # Wait for state change
         state = await self._wait_for_login_state_change(
-            login_page, from_state="code_form", timeout_ms=12_000
+            login_page, from_state="code_form", timeout_ms=25_000
         )
+        if state == "email_form":
+            state = await self._wait_for_post_otp_state(
+                context,
+                login_page,
+                timeout_ms=20_000,
+            )
         return {"ok": True, "state": state}
 
     async def get_login_page_state(self, profile_dir: Path) -> dict[str, Any]:
@@ -1310,6 +1472,30 @@ class CamoufoxManager:
         # Timed out — return whatever state we're in now (including unknown)
         return await self._detect_login_state(page)
 
+    async def _wait_for_post_otp_state(
+        self,
+        context,
+        page,
+        *,
+        timeout_ms: int = 20_000,
+    ) -> str:
+        deadline = asyncio.get_event_loop().time() + timeout_ms / 1000
+        last_state = "unknown"
+        while asyncio.get_event_loop().time() < deadline:
+            try:
+                cookies = await context.cookies("https://claude.ai")
+                if any(cookie.get("name") == "sessionKey" and cookie.get("value") for cookie in cookies):
+                    return "logged_in"
+            except Exception:
+                pass
+            state = await self._detect_login_state(page)
+            if state != "unknown":
+                last_state = state
+            if state in {"logged_in", "new_account_setup", "code_form"}:
+                return state
+            await asyncio.sleep(0.5)
+        return last_state
+
     async def _get_or_open_page(self, context, remote_url: str):
         pages = context.pages
         # 1. Prefer a page already at (or near) the target URL.
@@ -1327,18 +1513,30 @@ class CamoufoxManager:
         return await context.new_page()
 
     async def _find_prompt_editor(self, page):
-        selectors = [
-            "textarea",
+        # Primary selectors: require contenteditable='true' so we never match the
+        # disabled editor (Claude sets contenteditable="false" while generating a
+        # response).  Use a generous timeout — the watcher may arrive while a
+        # previous generation is still running and must wait for it to finish.
+        primary = [
+            ".ProseMirror[contenteditable='true']",
             "[contenteditable='true']",
-            "[role='textbox']",
-            ".ProseMirror",
         ]
         last_error: Exception | None = None
-        for selector in selectors:
+        for selector in primary:
             try:
                 locator = page.locator(selector).last
-                await locator.wait_for(timeout=10_000)
+                await locator.wait_for(timeout=90_000)
                 return locator
-            except Exception as exc:  # noqa: BLE001 - Playwright raises implementation-specific errors
+            except Exception as exc:  # noqa: BLE001
                 last_error = exc
+
+        # Fallback: older Claude UI variants (textarea, ARIA textbox) — short wait
+        for selector in ("textarea", "[role='textbox']"):
+            try:
+                locator = page.locator(selector).last
+                await locator.wait_for(timeout=5_000)
+                return locator
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+
         raise BrowserError(f"Could not find Claude prompt editor: {last_error}")
