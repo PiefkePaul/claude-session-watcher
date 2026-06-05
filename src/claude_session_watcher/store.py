@@ -583,6 +583,7 @@ class Store:
                     raw_json = excluded.raw_json,
                     last_seen_at = excluded.last_seen_at,
                     last_checked_at = excluded.last_checked_at,
+                    last_control_error = NULL,
                     updated_at = excluded.updated_at
                 """,
                 (
