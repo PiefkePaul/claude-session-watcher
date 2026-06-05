@@ -1249,8 +1249,11 @@ class CamoufoxManager:
                         'span',
                     ];
                     const seen = new Set();
-                    const terms =
-                        /(error|invalid|domain|disposable|temporary|not available|new users|trouble sending|cannot send|can't send|email)/i;
+                    const terms = new RegExp(
+                        '(error|invalid|domain|disposable|temporary' +
+                        '|not available|new users|trouble sending' +
+                        "|cannot send|can't send|email)", 'i'
+                    );
                     for (const selector of selectors) {
                         for (const node of document.querySelectorAll(selector)) {
                             const text = (node.innerText || "").trim();
