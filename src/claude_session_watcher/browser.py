@@ -1249,7 +1249,8 @@ class CamoufoxManager:
                         'span',
                     ];
                     const seen = new Set();
-                    const terms = /(error|invalid|domain|disposable|temporary|not available|new users|trouble sending|cannot send|can't send|email)/i;
+                    const terms =
+                        /(error|invalid|domain|disposable|temporary|not available|new users|trouble sending|cannot send|can't send|email)/i;
                     for (const selector of selectors) {
                         for (const node of document.querySelectorAll(selector)) {
                             const text = (node.innerText || "").trim();
@@ -1484,7 +1485,10 @@ class CamoufoxManager:
         while asyncio.get_event_loop().time() < deadline:
             try:
                 cookies = await context.cookies("https://claude.ai")
-                if any(cookie.get("name") == "sessionKey" and cookie.get("value") for cookie in cookies):
+                if any(
+                    cookie.get("name") == "sessionKey" and cookie.get("value")
+                    for cookie in cookies
+                ):
                     return "logged_in"
             except Exception:
                 pass
