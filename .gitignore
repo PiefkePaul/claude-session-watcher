@@ -11,3 +11,16 @@ data/
 node_modules/
 package-lock.json
 .server.*.log
+
+# Dev / AI tooling artifacts — not part of the public project
+WORKLOG.md
+CLAUDE.md
+CODEX.md
+PFLICHTENHEFT.md
+session_state.md
+.agents/
+.serena/
+.cocoindex_code/
+.tmp-*/
+*.err.log
+*.out.log
