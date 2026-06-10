@@ -8,7 +8,12 @@ on:
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        python-version: ["3.12"]
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
@@ -16,7 +21,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
           cache: pip
 
       - name: Install dependencies
@@ -27,3 +32,11 @@ jobs:
 
       - name: Tests
         run: python -m pytest
+
+      - name: CLI smoke
+        run: |
+          python -m claude_session_watcher.cli --help
+          python -m claude_session_watcher.cli account --help
+          python -m claude_session_watcher.cli session --help
+          python -m claude_session_watcher.cli watcher --help
+          python -m claude_session_watcher.cli dashboard --once

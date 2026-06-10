@@ -25,16 +25,24 @@ def read_pid(settings: Settings) -> int | None:
         return None
 
 
+def _run_windows_hidden(command: list[str]) -> subprocess.CompletedProcess[str]:
+    kwargs: dict[str, object] = {
+        "capture_output": True,
+        "text": True,
+        "encoding": "utf-8",
+        "errors": "replace",
+        "check": False,
+    }
+    if os.name == "nt":
+        kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    return subprocess.run(command, **kwargs)
+
+
 def process_running(pid: int | None) -> bool:
     if pid is None:
         return False
     if os.name == "nt":
-        result = subprocess.run(
-            ["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        result = _run_windows_hidden(["tasklist", "/FI", f"PID eq {pid}", "/FO", "CSV", "/NH"])
         return str(pid) in result.stdout
     try:
         os.kill(pid, 0)
@@ -60,12 +68,6 @@ def start_service(settings: Settings) -> ServiceStatus:
 
     env = os.environ.copy()
     env["CSW_DATA_DIR"] = str(settings.data_dir)
-    env["CSW_HOST"] = settings.host
-    env["CSW_PORT"] = str(settings.port)
-    if settings.ui_token:
-        env["CSW_UI_TOKEN"] = settings.ui_token
-    if settings.local_port_bind_only:
-        env["CSW_LOCAL_PORT_BIND_ONLY"] = "true"
 
     stdout_path = settings.logs_dir / "windows-service.out.log"
     stderr_path = settings.logs_dir / "windows-service.err.log"
@@ -73,11 +75,7 @@ def start_service(settings: Settings) -> ServiceStatus:
         sys.executable,
         "-m",
         "claude_session_watcher.cli",
-        "serve",
-        "--host",
-        settings.host,
-        "--port",
-        str(settings.port),
+        "run",
     ]
 
     creationflags = 0
@@ -110,7 +108,7 @@ def stop_service(settings: Settings, *, timeout: float = 10.0) -> ServiceStatus:
 
     assert pid is not None
     if os.name == "nt":
-        subprocess.run(["taskkill", "/PID", str(pid), "/T", "/F"], check=False)
+        _run_windows_hidden(["taskkill", "/PID", str(pid), "/T", "/F"])
     else:
         os.kill(pid, signal.SIGTERM)
 

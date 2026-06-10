@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "powershell -NonInteractive -File D:/Development/claude-session-watcher/.claude/hooks/post-edit.ps1",
+            "timeout": 20000
+          }
+        ]
+      }
+    ]
+  }
+}

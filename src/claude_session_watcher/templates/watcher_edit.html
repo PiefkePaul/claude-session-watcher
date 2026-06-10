@@ -1,70 +1,92 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Edit {{ watcher.name }} - Claude Session Watcher</title>
-    <link rel="stylesheet" href="/static/styles.css" />
-  </head>
-  <body>
-    <header class="topbar">
-      <div>
-        <h1>Edit watcher</h1>
-        <p>{{ watcher.name }}</p>
-      </div>
-      <a class="button secondary" href="/">Back</a>
-    </header>
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Edit {{ watcher.name }} &mdash; Claude Session Watcher</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com"/>
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
+  <link href="https://fonts.googleapis.com/css2?family=Oxanium:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="/static/styles.css?v=8"/>
+  <script>document.documentElement.setAttribute('data-theme',localStorage.getItem('csw-theme')||'dark');</script>
+</head>
+<body>
 
-    <main class="layout single">
-      <section class="panel editor-panel">
-        <h2>Configuration</h2>
-        <form class="watcher-form" action="/watchers/{{ watcher.id }}" method="post">
-          <label>
-            Name
-            <input name="name" value="{{ watcher.name }}" required />
-          </label>
-          <label>
-            Account
-            <select name="account_id" required>
-              {% for account in accounts %}
-              <option value="{{ account.id }}" {% if account.id == watcher.account_id %}selected{% endif %}>{{ account.name }}</option>
-              {% endfor %}
-            </select>
-          </label>
-          <label class="wide checkbox-row">
-            <input name="enabled" type="checkbox" value="true" {% if watcher.enabled %}checked{% endif %} />
-            Enabled
-          </label>
-          <label class="wide">
-            Remote Control URL
-            <input name="remote_url" value="{{ watcher.remote_url }}" required />
-          </label>
-          <label>
-            5h threshold
-            <input name="five_hour_threshold" type="number" value="{{ watcher.five_hour_threshold }}" min="1" max="100" step="0.1" />
-          </label>
-          <label>
-            7d threshold
-            <input name="seven_day_threshold" type="number" value="{{ watcher.seven_day_threshold }}" min="1" max="100" step="0.1" />
-          </label>
-          <label>
-            Check interval seconds
-            <input name="check_interval_seconds" type="number" value="{{ watcher.check_interval_seconds }}" min="10" />
-          </label>
-          <label class="wide">
-            Pause message
-            <textarea name="pause_message" rows="4">{{ watcher.pause_message }}</textarea>
-          </label>
-          <label class="wide">
-            Continue message
-            <input name="continue_message" value="{{ watcher.continue_message }}" />
-          </label>
-          <div class="form-actions wide">
-            <button type="submit">Save watcher</button>
-            <a class="button secondary" href="/">Cancel</a>
-          </div>
-        </form>
-      </section>
-    </main>
-  </body>
+  <header class="topbar">
+    <div class="topbar-brand">
+      <div class="brand-icon">
+        <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+          <circle cx="9" cy="9" r="2.2" fill="currentColor"/>
+          <circle cx="9" cy="9" r="5" stroke="currentColor" stroke-width="1.2" fill="none"/>
+          <circle cx="9" cy="9" r="8" stroke="currentColor" stroke-width="0.7" stroke-dasharray="2.2 2.6" fill="none"/>
+        </svg>
+      </div>
+      <div>
+        <h1>Edit Watcher</h1>
+        <span class="topbar-sub">{{ watcher.name }}</span>
+      </div>
+    </div>
+    <div class="topbar-right">
+      <a class="btn btn-ghost" href="/">&larr; Back</a>
+    </div>
+  </header>
+
+  <div class="editor-layout">
+    <div class="editor-card">
+      <h2 style="margin-bottom:20px;">Configuration</h2>
+      <form class="editor-grid" action="/watchers/{{ watcher.id }}" method="post">
+        <label class="field-label">
+          Name
+          <input class="field-input" name="name" value="{{ watcher.name }}" required/>
+        </label>
+        <label class="field-label">
+          Account
+          <select class="field-input" name="account_id" required>
+            {% for account in accounts %}
+            <option value="{{ account.id }}" {% if account.id == watcher.account_id %}selected{% endif %}>
+              {{ account.name }}
+            </option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="field-label checkbox-field editor-wide" style="align-self:start; margin-top:4px;">
+          <input type="checkbox" name="enabled" value="true" {% if watcher.enabled %}checked{% endif %}/>
+          <span>Enabled</span>
+        </label>
+        <label class="field-label editor-wide">
+          Remote Control URL
+          <input class="field-input" name="remote_url" value="{{ watcher.remote_url }}" required/>
+        </label>
+        <label class="field-label">
+          5h Threshold %
+          <input class="field-input" name="five_hour_threshold" type="number"
+                 value="{{ watcher.five_hour_threshold }}" min="1" max="100" step="0.1"/>
+        </label>
+        <label class="field-label">
+          7d Threshold %
+          <input class="field-input" name="seven_day_threshold" type="number"
+                 value="{{ watcher.seven_day_threshold }}" min="1" max="100" step="0.1"/>
+        </label>
+        <label class="field-label editor-wide">
+          Check Interval (seconds)
+          <input class="field-input" name="check_interval_seconds" type="number"
+                 value="{{ watcher.check_interval_seconds }}" min="10"/>
+        </label>
+        <label class="field-label editor-wide">
+          Pause Message
+          <textarea class="field-input" name="pause_message" rows="4">{{ watcher.pause_message }}</textarea>
+        </label>
+        <label class="field-label editor-wide">
+          Continue Message
+          <input class="field-input" name="continue_message" value="{{ watcher.continue_message }}"/>
+        </label>
+        <div class="editor-wide" style="display:flex; gap:10px; align-items:center; margin-top:4px;">
+          <button class="btn btn-primary" type="submit">Save Watcher</button>
+          <a class="btn btn-ghost" href="/">Cancel</a>
+        </div>
+      </form>
+    </div>
+  </div>
+
+</body>
 </html>

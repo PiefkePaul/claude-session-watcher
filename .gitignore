@@ -24,3 +24,6 @@ session_state.md
 .tmp-*/
 *.err.log
 *.out.log
+
+# Claude local settings (user-specific, not for sharing)
+.claude/settings.local.json

@@ -16,7 +16,9 @@ def default_data_dir() -> Path:
 
 
 def default_headless() -> str | bool:
-    return True if os.name == "nt" else "virtual"
+    # Camoufox virtual display mode is Linux-only.
+    # Use standard headless=True on Windows and macOS by default.
+    return "virtual" if os.name != "nt" and os.uname().sysname.lower() == "linux" else True
 
 
 class Settings(BaseSettings):
