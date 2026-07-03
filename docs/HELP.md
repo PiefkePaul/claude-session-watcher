@@ -60,8 +60,13 @@ csw native status
 
 ```bash
 csw watcher doctor
+csw watcher doctor --account PC
+csw session probe PC --json
 csw watcher logs
 csw watcher history --limit 20
 ```
+
+Usage limit troubleshooting and supported Claude usage payload shapes are documented in
+[USAGE_LIMITS.md](USAGE_LIMITS.md).
 
 For full reference, see [CLI_COMMANDS.md](CLI_COMMANDS.md).

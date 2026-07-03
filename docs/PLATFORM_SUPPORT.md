@@ -60,5 +60,6 @@ csw fetch-browser
 2. `csw dashboard --once`
 3. `csw account list`
 4. `csw watcher doctor`
-5. `csw watcher run` (short manual smoke test)
-6. Headless OTP login flow (`csw account login ...`)
+5. `csw session probe <account> --json` after login
+6. `csw watcher run` (short manual smoke test)
+7. Headless OTP login flow (`csw account login ...`)

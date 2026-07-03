@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from .usage import ClaudeUsageClient
+
 LOCAL_TZ = ZoneInfo("Europe/Berlin")
 
 
@@ -56,17 +58,13 @@ def _limit_from_usage(raw_json: str | None, key: str, *, weekly: bool = False) -
         data = json.loads(raw_json)
     except json.JSONDecodeError:
         return UiLimit(utilization=None, reset_display="")
-    section = data.get(key)
-    if not isinstance(section, dict):
+    snapshot = ClaudeUsageClient._parse(data)
+    limit = snapshot.five_hour if key == "five_hour" else snapshot.seven_day
+    if limit is None:
         return UiLimit(utilization=None, reset_display="")
-    utilization = section.get("utilization")
-    try:
-        utilization = float(utilization)
-    except (TypeError, ValueError):
-        utilization = None
     return UiLimit(
-        utilization=utilization,
-        reset_display=format_reset(section.get("resets_at"), weekly=weekly),
+        utilization=limit.utilization,
+        reset_display=format_reset(limit.resets_at, weekly=weekly),
     )
 
 

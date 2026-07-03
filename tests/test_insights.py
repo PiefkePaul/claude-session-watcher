@@ -77,6 +77,21 @@ def test_insights_report_weekly_blocked():
     assert insights.next_pause_at is None
 
 
+def test_insights_read_rate_limits_payload_without_samples():
+    watcher = AccountWatcher(
+        id=1,
+        account_id=1,
+        five_hour_threshold=95.0,
+        last_usage_json='{"rate_limits":{"five_hour":{"used_percentage":96}}}',
+        last_checked_at="2026-05-26T10:00:00+00:00",
+    )
+
+    insights = build_usage_insights(watcher, [])
+
+    assert insights.status == "near-limit"
+    assert insights.reason == "5-hour limit at 96.0%"
+
+
 def test_insights_calculate_burn_rate_when_reset_timestamp_changes():
     watcher = AccountWatcher(id=1, account_id=1, five_hour_threshold=95.0)
     samples = [

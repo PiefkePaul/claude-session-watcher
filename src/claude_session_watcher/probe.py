@@ -158,14 +158,27 @@ async def probe_account(
         try:
             token, source_path = load_oauth_access_token(oauth_credentials_path)
             oauth_payload = await ClaudeOAuthUsageClient(token).fetch_raw()
-            five_hour = oauth_payload.get("five_hour")
-            seven_day = oauth_payload.get("seven_day")
+            oauth_snapshot = ClaudeUsageClient._parse(oauth_payload)
             results["oauth_usage"] = ProbeResult(
                 ok=True,
                 details={
                     "source": str(source_path),
-                    "five_hour": five_hour if isinstance(five_hour, dict) else None,
-                    "seven_day": seven_day if isinstance(seven_day, dict) else None,
+                    "five_hour": (
+                        None
+                        if oauth_snapshot.five_hour is None
+                        else {
+                            "utilization": oauth_snapshot.five_hour.utilization,
+                            "resets_at": oauth_snapshot.five_hour.resets_at,
+                        }
+                    ),
+                    "seven_day": (
+                        None
+                        if oauth_snapshot.seven_day is None
+                        else {
+                            "utilization": oauth_snapshot.seven_day.utilization,
+                            "resets_at": oauth_snapshot.seven_day.resets_at,
+                        }
+                    ),
                     "keys": sorted(str(key) for key in oauth_payload.keys()),
                 },
             )

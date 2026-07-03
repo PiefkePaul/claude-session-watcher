@@ -86,6 +86,7 @@ Primary command groups:
 
 Detailed command reference: [docs/CLI_COMMANDS.md](docs/CLI_COMMANDS.md)
 Native app guide: [docs/NATIVE_APP.md](docs/NATIVE_APP.md)
+Usage limit detection: [docs/USAGE_LIMITS.md](docs/USAGE_LIMITS.md)
 
 Legacy top-level commands are still available for compatibility but hidden from the default help output.
 
@@ -137,6 +138,24 @@ csw serve --open-ui
 ```
 
 CLI remains the primary path.
+
+## Usage Limit Detection
+
+CSW checks usage per Claude account and normalizes Claude's 5-hour and 7-day limit data
+before storing samples or deciding whether to pause/continue sessions.
+
+Supported usage payloads include the older `five_hour` / `seven_day` sections and newer
+`rate_limits` / `rateLimits` shapes with fields such as `used_percentage` and `resets_at`.
+
+Probe and troubleshooting commands:
+
+```bash
+csw session probe <account> --json
+csw watcher doctor --account <account>
+csw watcher check <account>
+```
+
+Details: [docs/USAGE_LIMITS.md](docs/USAGE_LIMITS.md)
 
 ## Configuration
 

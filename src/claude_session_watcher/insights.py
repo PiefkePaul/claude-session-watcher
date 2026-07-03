@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 from .models import AccountWatcher, UsageSample
+from .usage import ClaudeUsageClient
 
 
 @dataclass(frozen=True, slots=True)
@@ -88,32 +89,19 @@ def _current_usage(watcher: AccountWatcher, samples: list[UsageSample]) -> _Curr
             data = json.loads(watcher.last_usage_json)
         except json.JSONDecodeError:
             data = {}
+        snapshot = ClaudeUsageClient._parse(data)
         return _CurrentUsage(
-            five_hour_utilization=_utilization_from_raw(data, "five_hour"),
-            seven_day_utilization=_utilization_from_raw(data, "seven_day"),
-            five_hour_resets_at=_reset_from_raw(data, "five_hour"),
-            seven_day_resets_at=_reset_from_raw(data, "seven_day"),
+            five_hour_utilization=(
+                snapshot.five_hour.utilization if snapshot.five_hour else None
+            ),
+            seven_day_utilization=(
+                snapshot.seven_day.utilization if snapshot.seven_day else None
+            ),
+            five_hour_resets_at=snapshot.five_hour.resets_at if snapshot.five_hour else None,
+            seven_day_resets_at=snapshot.seven_day.resets_at if snapshot.seven_day else None,
             created_at=watcher.last_checked_at,
         )
     return _CurrentUsage(None, None, None, None, None)
-
-
-def _utilization_from_raw(data: dict[str, object], key: str) -> float | None:
-    section = data.get(key)
-    if not isinstance(section, dict):
-        return None
-    try:
-        return float(section.get("utilization"))
-    except (TypeError, ValueError):
-        return None
-
-
-def _reset_from_raw(data: dict[str, object], key: str) -> str | None:
-    section = data.get(key)
-    if not isinstance(section, dict):
-        return None
-    resets_at = section.get("resets_at")
-    return str(resets_at) if resets_at else None
 
 
 def _burn_rate_per_hour(samples: list[UsageSample], key: str) -> float | None:

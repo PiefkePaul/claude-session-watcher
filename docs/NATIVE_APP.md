@@ -27,6 +27,14 @@ The app includes:
 ```bash
 csw native backend
 csw native status
+csw native open
+csw native quit
+csw native mode
+csw native mode-set temporary
+csw native mode-set installed
+csw native autostart status
+csw native autostart on
+csw native autostart off
 csw native service-install
 csw native service-start
 csw native service-stop
@@ -38,6 +46,13 @@ Backend mapping:
 - Linux -> `systemd --user`
 - macOS -> `launchd` user LaunchAgent
 - Windows -> Task Scheduler task (user scope)
+
+Desktop-agent controls:
+- `open` starts the agent when needed or focuses the existing app window.
+- `quit` requests the running native app agent to exit.
+- `mode` shows whether the desktop agent is temporary or installed.
+- `mode-set temporary|installed` changes the desktop mode.
+- `autostart on|off|status` manages desktop-agent autostart.
 
 ## Notes
 

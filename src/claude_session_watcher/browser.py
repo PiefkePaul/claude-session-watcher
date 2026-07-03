@@ -704,12 +704,15 @@ class CamoufoxManager:
             except BrowserError as exc:
                 errors.append(f"{org_id}: {exc}")
                 continue
-            if isinstance(usage, dict) and (
-                "five_hour" in usage or "seven_day" in usage
-            ):
-                usage["_csw_org_id"] = org_id
-                usage["_csw_org_name"] = org.get("name")
-                return usage
+            if isinstance(usage, dict):
+                from .usage import ClaudeUsageClient
+
+                snapshot = ClaudeUsageClient._parse(usage)
+                if snapshot.five_hour or snapshot.seven_day:
+                    normalized_usage = dict(snapshot.raw)
+                    normalized_usage["_csw_org_id"] = org_id
+                    normalized_usage["_csw_org_name"] = org.get("name")
+                    return normalized_usage
             errors.append(f"{org_id}: usage payload missing expected keys")
 
         detail = "; ".join(errors) if errors else "no usable organization ids found"

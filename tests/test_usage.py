@@ -43,3 +43,64 @@ def test_weekly_limit_blocks_resume_when_above_weekly_threshold():
     )
 
     assert snapshot.is_resume_ready(95.0, 98.0) is False
+
+
+def test_parse_statusline_rate_limits_payload():
+    snapshot = ClaudeUsageClient._parse(
+        {
+            "rate_limits": {
+                "five_hour": {
+                    "used_percentage": 91.25,
+                    "resets_at": "2026-07-03T18:00:00Z",
+                },
+                "seven_day": {
+                    "used_percentage": "33.5",
+                    "resets_at": "2026-07-06T08:00:00Z",
+                },
+            }
+        }
+    )
+
+    assert snapshot.five_hour.utilization == 91.25
+    assert snapshot.five_hour.resets_at == "2026-07-03T18:00:00Z"
+    assert snapshot.seven_day.utilization == 33.5
+    assert snapshot.raw["five_hour"]["utilization"] == 91.25
+    assert snapshot.raw["seven_day"]["utilization"] == 33.5
+
+
+def test_parse_rate_limit_list_payload():
+    snapshot = ClaudeUsageClient._parse(
+        {
+            "rateLimits": [
+                {
+                    "window": "5-hour",
+                    "used_percentage": 96,
+                    "resetAt": "2026-07-03T19:00:00Z",
+                },
+                {
+                    "window": "7-day",
+                    "usage_percent": 71,
+                    "reset_at": "2026-07-07T09:00:00Z",
+                },
+            ]
+        }
+    )
+
+    assert snapshot.five_hour.utilization == 96.0
+    assert snapshot.five_hour.resets_at == "2026-07-03T19:00:00Z"
+    assert snapshot.seven_day.utilization == 71.0
+    assert snapshot.seven_day.resets_at == "2026-07-07T09:00:00Z"
+
+
+def test_parse_used_and_limit_payload():
+    snapshot = ClaudeUsageClient._parse(
+        {
+            "limits": {
+                "5h": {"used": 48, "limit": 50},
+                "weekly": {"used": 160, "limit": 200},
+            }
+        }
+    )
+
+    assert snapshot.five_hour.utilization == 96.0
+    assert snapshot.seven_day.utilization == 80.0
