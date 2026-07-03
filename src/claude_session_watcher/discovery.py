@@ -7,7 +7,14 @@ from pathlib import Path
 from .browser import CamoufoxManager
 from .models import Account, ClaudeSession, utc_now
 from .profile_cookies import load_claude_cookies
-from .session_list import ClaudeWebSessionsClient
+from .session_list import (
+    ClaudeWebSessionsClient,
+    raw_session_id,
+    raw_session_is_remote_control,
+    raw_session_status,
+    raw_session_title,
+    raw_session_url,
+)
 from .store import Store
 from .usage import UsageLoginRequiredError
 
@@ -17,6 +24,7 @@ class DiscoveryResult:
     account_id: int
     found: int
     updated: int
+    selected: int = 0
 
 
 class ClaudeSessionDiscoveryProvider:
@@ -54,23 +62,18 @@ class ClaudeSessionDiscoveryProvider:
             # Two discovery backends exist:
             # - cookie/http: returns v1 session objects where "id" is the session id
             # - browser/dom: returns our internal dict with "session_key" + "url"
-            session_key = str(raw.get("id") or raw.get("session_key") or "")
-            url = str(raw.get("url") or "")
-            if not url and session_key:
-                url = f"https://claude.ai/code/{session_key}"
-            if not session_key or not url:
+            session_key = raw_session_id(raw)
+            if not session_key:
                 continue
-            tags = raw.get("tags")
-            is_remote = isinstance(tags, list) and any(
-                str(tag) == "remote-control-repl" for tag in tags
-            )
-            status = raw.get("session_status") or raw.get("status") or "unknown"
+            is_remote = raw_session_is_remote_control(raw)
+            url = raw_session_url(raw, session_key)
+            status = raw_session_status(raw)
             sessions.append(
                 ClaudeSession(
                     id=None,
                     account_id=account.id,
                     session_key=session_key,
-                    title=str(raw.get("title") or session_key),
+                    title=raw_session_title(raw, session_key),
                     url=url,
                     kind=str(raw.get("kind") or ("remote" if is_remote else "cloud")),
                     status=str(status or "unknown"),
@@ -94,10 +97,33 @@ class SessionDiscoveryService:
         discovered = await self.provider.discover(account)
         seen_keys: set[str] = set()
         updated = 0
+        selected = 0
         for session in discovered:
-            self.store.upsert_session(session)
+            existing = self._existing_session(account.id, session.session_key)
+            if existing is None and _should_auto_select(session):
+                session.watch_enabled = True
+            saved = self.store.upsert_session(session)
+            if existing is None and saved.watch_enabled:
+                selected += 1
             seen_keys.add(session.session_key)
             updated += 1
         if seen_keys:
             self.store.mark_missing_sessions(account.id, seen_keys)
-        return DiscoveryResult(account_id=account.id, found=len(discovered), updated=updated)
+        return DiscoveryResult(
+            account_id=account.id,
+            found=len(discovered),
+            updated=updated,
+            selected=selected,
+        )
+
+    def _existing_session(self, account_id: int, session_key: str) -> ClaudeSession | None:
+        try:
+            return self.store.get_session_by_key(account_id, session_key)
+        except KeyError:
+            return None
+
+
+def _should_auto_select(session: ClaudeSession) -> bool:
+    if session.status.lower() == "archived":
+        return False
+    return session.control_supported or session.kind.lower() == "remote"

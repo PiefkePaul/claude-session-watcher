@@ -124,7 +124,10 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             store.add_account_event(
                 account_watcher.id,
                 "info",
-                f"Discovery updated {result.updated} sessions",
+                (
+                    f"Discovery updated {result.updated} sessions; "
+                    f"auto-selected {result.selected}"
+                ),
             )
         except Exception as exc:  # noqa: BLE001
             account_watcher = store.ensure_account_watcher(account_id)
@@ -766,7 +769,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     @app.post("/api/accounts/{account_id}/discover")
     async def api_discover_account(account_id: int):
         result = await discovery.discover_account(store.get_account(account_id))
-        return {"account_id": account_id, "found": result.found, "updated": result.updated}
+        return {
+            "account_id": account_id,
+            "found": result.found,
+            "updated": result.updated,
+            "selected": result.selected,
+        }
 
     @app.post("/api/accounts/{account_id}/probe")
     async def api_probe_account(account_id: int):

@@ -55,7 +55,9 @@ csw session discover PC
 csw session list PC
 ```
 
-4. Select target sessions:
+Newly discovered controllable remote sessions are selected automatically.
+
+4. Optionally adjust target sessions:
 
 ```bash
 csw session enable <session-id-or-key-or-title>

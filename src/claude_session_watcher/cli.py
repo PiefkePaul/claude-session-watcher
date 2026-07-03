@@ -1473,7 +1473,10 @@ async def _discover(args, settings: Settings) -> int:
         result = await discovery.discover_account(account)
     finally:
         await browser.close()
-    print(f"{account.name}: discovered {result.found}, updated {result.updated}")
+    print(
+        f"{account.name}: discovered {result.found}, "
+        f"updated {result.updated}, selected {result.selected}"
+    )
     return 0
 
 

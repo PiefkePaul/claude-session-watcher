@@ -38,6 +38,10 @@ csw session probe <account> [--json] [--session <session_id>] [--send-message ".
 local Claude Code OAuth usage endpoint. See [USAGE_LIMITS.md](USAGE_LIMITS.md) for usage
 source and payload compatibility details.
 
+`session discover` adds newly found Claude Code remote-control sessions to the account and
+automatically selects newly discovered controllable remote sessions for the watcher. Existing
+manual session selections are preserved.
+
 ## Watcher
 
 ```bash

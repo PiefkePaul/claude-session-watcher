@@ -11,6 +11,7 @@ from .controller import (
     HttpSessionController,
     SessionController,
 )
+from .discovery import ClaudeSessionDiscoveryProvider, SessionDiscoveryService
 from .engine import WatcherEngine
 from .models import Account, AccountWatcher, Watcher
 from .notifications import NotificationEvent, Notifier, notifier_from_settings
@@ -33,6 +34,7 @@ class WatcherService:
         *,
         usage_provider: UsageProvider | None = None,
         session_controller: SessionController | None = None,
+        session_discovery: SessionDiscoveryService | None = None,
         engine: WatcherEngine | None = None,
         notifier: Notifier | None = None,
     ):
@@ -53,6 +55,13 @@ class WatcherService:
             )
         else:
             self.session_controller = session_controller
+        self.session_discovery = session_discovery or SessionDiscoveryService(
+            store,
+            ClaudeSessionDiscoveryProvider(
+                browser,
+                keepalive=getattr(settings, "browser_keepalive", False),
+            ),
+        )
         self.engine = engine or WatcherEngine(
             resume_safety_margin_seconds=getattr(settings, "resume_safety_margin_seconds", 120)
         )
@@ -129,6 +138,8 @@ class WatcherService:
         if watcher.id is None:
             raise ValueError("Watcher must be stored before checking")
 
+        await self._auto_discover_sessions(account, watcher)
+
         result = await self.usage_provider.fetch(account)
         decision = self.engine.decide(watcher, result.snapshot)
         raw = dict(result.snapshot.raw)
@@ -174,6 +185,29 @@ class WatcherService:
                 level=decision.event_level,
             )
         return decision.action
+
+    async def _auto_discover_sessions(
+        self,
+        account: Account,
+        watcher: AccountWatcher,
+    ) -> None:
+        if watcher.id is None:
+            return
+        try:
+            result = await self.session_discovery.discover_account(account)
+        except Exception as exc:  # noqa: BLE001 - discovery must not block usage checks
+            self.store.add_account_event(
+                watcher.id,
+                "warning",
+                f"Session auto-discovery failed: {exc}",
+            )
+            return
+        if result.selected:
+            self.store.add_account_event(
+                watcher.id,
+                "info",
+                f"Auto-selected {result.selected} new remote session(s)",
+            )
 
     async def _send(self, watcher: Watcher, account: Account, message: str) -> None:
         await self.session_controller.send(watcher, account, message)

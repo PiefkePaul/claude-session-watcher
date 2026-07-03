@@ -1,5 +1,6 @@
 import pytest
 
+from claude_session_watcher.discovery import SessionDiscoveryService
 from claude_session_watcher.models import ClaudeSession
 from claude_session_watcher.providers import UsageFetchResult
 from claude_session_watcher.store import Store
@@ -41,6 +42,16 @@ class RecordingController:
 
     async def send_to_session(self, account, session, message):
         self.sent.append((session.session_key, message))
+
+
+class StaticDiscoveryProvider:
+    def __init__(self, sessions):
+        self.sessions = sessions
+        self.calls = 0
+
+    async def discover(self, account):
+        self.calls += 1
+        return self.sessions
 
 
 @pytest.mark.asyncio
@@ -202,3 +213,41 @@ async def test_service_attempts_archived_selected_sessions(tmp_path):
         ("session_active", account_watcher.pause_message),
         ("session_archived", account_watcher.pause_message),
     ]
+
+
+@pytest.mark.asyncio
+async def test_service_auto_discovers_and_selects_new_remote_sessions(tmp_path):
+    store = Store(tmp_path / "watcher.sqlite3")
+    account = store.create_account("work", str(tmp_path / "profile"))
+    account_watcher = store.ensure_account_watcher(account.id)
+    provider = StaticDiscoveryProvider(
+        [
+            ClaudeSession(
+                id=None,
+                account_id=account.id,
+                session_key="session_new",
+                title="new",
+                url="https://claude.ai/code/session_new",
+                kind="remote",
+                status="active",
+                control_supported=True,
+            )
+        ]
+    )
+    controller = RecordingController()
+    service = WatcherService(
+        store,
+        browser=None,
+        settings=object(),
+        usage_provider=StaticLimitProvider(),
+        session_controller=controller,
+        session_discovery=SessionDiscoveryService(store, provider),
+    )
+
+    result = await service.check_account_now(account_watcher.id)
+
+    saved = store.get_session_by_key(account.id, "session_new")
+    assert result == "paused"
+    assert provider.calls == 1
+    assert saved.watch_enabled is True
+    assert controller.sent == [("session_new", account_watcher.pause_message)]

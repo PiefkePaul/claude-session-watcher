@@ -23,6 +23,9 @@ csw session list PC
 csw session enable <session-id>
 ```
 
+`csw session discover` automatically selects newly discovered controllable remote sessions;
+manual selections are preserved.
+
 ### Start monitoring
 
 ```bash

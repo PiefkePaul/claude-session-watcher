@@ -3,7 +3,7 @@ from __future__ import annotations
 import httpx
 import pytest
 
-from claude_session_watcher.session_list import ClaudeWebSessionsClient
+from claude_session_watcher.session_list import ClaudeWebSessionsClient, SessionListError
 from claude_session_watcher.usage import ClaudeCookie
 
 
@@ -45,3 +45,23 @@ async def test_send_user_message_uses_user_event_payload(monkeypatch):
     assert '"role":"user"' in body
     assert '"content":"hello from test"' in body
     assert '"session_id":"session_01TEST"' in body
+
+
+def test_parse_page_accepts_nested_items_payload():
+    page = ClaudeWebSessionsClient._parse_page(
+        {
+            "data": {
+                "items": [{"session_id": "session_nested", "title": "nested"}],
+                "page_info": {"hasMore": True, "endCursor": "session_nested"},
+            }
+        }
+    )
+
+    assert page.sessions == [{"session_id": "session_nested", "title": "nested"}]
+    assert page.has_more is True
+    assert page.last_id == "session_nested"
+
+
+def test_parse_page_rejects_payload_without_session_list():
+    with pytest.raises(SessionListError, match="session list"):
+        ClaudeWebSessionsClient._parse_page({"ok": True})

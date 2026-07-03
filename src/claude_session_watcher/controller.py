@@ -9,7 +9,14 @@ import httpx
 from .browser import CamoufoxManager
 from .models import Account, ClaudeSession, Watcher
 from .profile_cookies import load_claude_cookies
-from .session_list import ClaudeWebSessionsClient, SessionListError
+from .session_list import (
+    ClaudeWebSessionsClient,
+    SessionListError,
+    raw_session_id,
+    raw_session_is_remote_control,
+    raw_session_status,
+    raw_session_url,
+)
 
 
 class SessionController(Protocol):
@@ -101,7 +108,7 @@ class HttpSessionController:
 
         # 1) Exact ID/url-key match.
         for raw in all_sessions:
-            raw_id = _raw_session_id(raw)
+            raw_id = raw_session_id(raw)
             raw_url = str(raw.get("url") or "")
             raw_url_key = _session_key_from_url(raw_url)
             if raw_id and raw_id in attempted_keys:
@@ -115,17 +122,14 @@ class HttpSessionController:
             return (None, None)
         candidates: list[tuple[int, dict[str, object]]] = []
         for raw in all_sessions:
-            raw_id = _raw_session_id(raw)
+            raw_id = raw_session_id(raw)
             if not raw_id:
                 continue
             title = str(raw.get("title") or "").strip().casefold()
             if title != wanted_title:
                 continue
-            status = str(raw.get("session_status") or raw.get("status") or "").strip().lower()
-            tags = raw.get("tags")
-            is_remote = isinstance(tags, list) and any(
-                str(tag) == "remote-control-repl" for tag in tags
-            )
+            status = raw_session_status(raw).strip().lower()
+            is_remote = raw_session_is_remote_control(raw)
             rank = 0
             if status in {"active", "online", "idle"}:
                 rank += 2
@@ -140,8 +144,8 @@ class HttpSessionController:
             return (None, None)
         candidates.sort(key=lambda item: item[0], reverse=True)
         best = candidates[0][1]
-        best_id = _raw_session_id(best)
-        best_url = str(best.get("url") or "")
+        best_id = raw_session_id(best)
+        best_url = raw_session_url(best, best_id) if best_id else ""
         return (best_id, best_url or None)
 
 
@@ -170,13 +174,6 @@ def _session_key_from_url(url: str) -> str | None:
     if match:
         return match.group(1)
     return None
-
-
-def _raw_session_id(raw: dict[str, object]) -> str | None:
-    value = raw.get("id") or raw.get("session_key")
-    if not value:
-        return None
-    return str(value)
 
 
 def _unique_nonempty(values: list[str | None]) -> list[str]:

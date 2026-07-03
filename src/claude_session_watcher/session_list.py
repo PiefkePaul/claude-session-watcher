@@ -99,14 +99,22 @@ class ClaudeWebSessionsClient:
     def _parse_page(payload: object) -> SessionListPage:
         if not isinstance(payload, dict):
             raise SessionListError("Claude sessions response was not a JSON object")
-        raw_sessions = payload.get("data") or payload.get("sessions") or []
-        if not isinstance(raw_sessions, list):
+        raw_sessions = _find_session_list(payload)
+        if raw_sessions is None:
             raise SessionListError("Claude sessions response did not contain a session list")
         sessions: list[dict[str, Any]] = [
             item for item in raw_sessions if isinstance(item, dict)
         ]
-        has_more = bool(payload.get("has_more"))
-        last_id = payload.get("last_id")
+        has_more = bool(
+            _first_page_value(
+                payload,
+                ("has_more", "hasMore", "has_next_page", "hasNextPage"),
+            )
+        )
+        last_id = _first_page_value(
+            payload,
+            ("last_id", "lastId", "end_cursor", "endCursor", "next_cursor", "nextCursor"),
+        )
         last_id_str = str(last_id) if last_id else None
         return SessionListPage(sessions=sessions, has_more=has_more, last_id=last_id_str)
 
@@ -254,3 +262,105 @@ class ClaudeWebSessionsClient:
         if last_exc:
             raise last_exc
         raise SessionListError("Failed to send message (no payload candidates attempted)")
+
+
+def raw_session_id(raw: dict[str, Any]) -> str | None:
+    for key in ("id", "session_key", "session_id", "sessionId", "uuid"):
+        value = raw.get(key)
+        if value:
+            return str(value)
+    return None
+
+
+def raw_session_title(raw: dict[str, Any], fallback: str) -> str:
+    for key in ("title", "name", "display_name", "displayName"):
+        value = raw.get(key)
+        if value:
+            return str(value)
+    return fallback
+
+
+def raw_session_status(raw: dict[str, Any]) -> str:
+    for key in ("session_status", "status", "state", "connection_status", "connectionStatus"):
+        value = raw.get(key)
+        if value:
+            return str(value)
+    return "unknown"
+
+
+def raw_session_url(raw: dict[str, Any], session_key: str) -> str:
+    for key in ("url", "remote_url", "remoteUrl", "href", "link"):
+        value = raw.get(key)
+        if value:
+            return str(value)
+    return f"https://claude.ai/code/{session_key}"
+
+
+def raw_session_is_remote_control(raw: dict[str, Any]) -> bool:
+    for key in (
+        "control_supported",
+        "controlSupported",
+        "remote_control",
+        "remoteControl",
+        "remote_control_supported",
+        "remoteControlSupported",
+    ):
+        value = raw.get(key)
+        if isinstance(value, bool):
+            return value
+    kind = str(raw.get("kind") or raw.get("type") or "").lower()
+    if kind in {"remote", "remote_control", "remote-control"}:
+        return True
+    tags = raw.get("tags")
+    if isinstance(tags, str):
+        tag_values = [tags]
+    elif isinstance(tags, list):
+        tag_values = [str(tag) for tag in tags]
+    else:
+        tag_values = []
+    normalized_tags = {
+        "".join(char for char in tag.lower() if char.isalnum())
+        for tag in tag_values
+    }
+    return bool(
+        normalized_tags
+        & {
+            "remote",
+            "remotecontrol",
+            "remotecontrolrepl",
+            "ccr",
+            "claudecode",
+        }
+    )
+
+
+def _find_session_list(value: object) -> list[object] | None:
+    if isinstance(value, list):
+        return value
+    if not isinstance(value, dict):
+        return None
+    for key in ("data", "sessions", "items", "results", "nodes"):
+        nested = value.get(key)
+        if isinstance(nested, list):
+            return nested
+        found = _find_session_list(nested)
+        if found is not None:
+            return found
+    return None
+
+
+def _first_page_value(payload: dict[str, Any], keys: tuple[str, ...]) -> object | None:
+    sources: list[dict[str, Any]] = [payload]
+    for key in ("data", "pagination", "page_info", "pageInfo", "meta"):
+        value = payload.get(key)
+        if isinstance(value, dict):
+            sources.append(value)
+            for nested_key in ("pagination", "page_info", "pageInfo", "meta"):
+                nested = value.get(nested_key)
+                if isinstance(nested, dict):
+                    sources.append(nested)
+    for source in sources:
+        for key in keys:
+            if key in source:
+                return source[key]
+    return None
