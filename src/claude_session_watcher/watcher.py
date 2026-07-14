@@ -23,6 +23,7 @@ from .providers import (
 )
 from .settings import Settings
 from .store import Store
+from .usage import UsageAuthError, UsageLoginRequiredError
 
 
 class WatcherService:
@@ -140,7 +141,18 @@ class WatcherService:
 
         await self._auto_discover_sessions(account, watcher)
 
-        result = await self.usage_provider.fetch(account)
+        try:
+            result = await self.usage_provider.fetch(account)
+        except (UsageAuthError, UsageLoginRequiredError) as exc:
+            # The Claude session is no longer valid server-side. Downgrade the
+            # account status so the UI stops showing a stale "logged-in".
+            if account.id is not None:
+                self.store.update_account_status(account.id, "login-expired", str(exc))
+            raise
+        if account.id is not None and account.status == "login-expired":
+            # Usage is readable again (e.g. the user re-authenticated in the
+            # open browser) — restore the account status.
+            self.store.update_account_status(account.id, "logged-in")
         decision = self.engine.decide(watcher, result.snapshot)
         raw = dict(result.snapshot.raw)
         raw["_csw_usage_source"] = result.source
