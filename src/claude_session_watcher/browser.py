@@ -153,7 +153,17 @@ class CamoufoxManager:
                 kwargs.pop("firefox_user_prefs", None)
                 kwargs.pop("viewport", None)
                 manager = AsyncCamoufox(**kwargs)
-            context = await manager.__aenter__()
+            try:
+                context = await manager.__aenter__()
+            except Exception:
+                # A failed launch (e.g. Playwright protocol error) leaves the
+                # driver process and its pipes running; without this cleanup the
+                # server leaks file descriptors until EMFILE takes it down.
+                try:
+                    await manager.__aexit__(None, None, None)
+                except Exception:
+                    pass
+                raise
             self._sessions[key] = BrowserSession(
                 manager=manager,
                 context=context,
