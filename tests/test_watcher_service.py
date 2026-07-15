@@ -329,3 +329,25 @@ async def test_non_auth_error_keeps_account_status(tmp_path):
         await service.check_account_now(account_watcher.id)
 
     assert store.get_account(account.id).status == "logged-in"
+
+
+@pytest.mark.asyncio
+async def test_blocked_error_does_not_mark_login_expired(tmp_path):
+    from claude_session_watcher.usage import UsageBlockedError
+
+    store = Store(tmp_path / "watcher.sqlite3")
+    account = store.create_account("work", str(tmp_path / "profile"))
+    store.update_account_status(account.id, "logged-in")
+    account_watcher = store.ensure_account_watcher(account.id)
+    service = WatcherService(
+        store,
+        browser=None,
+        settings=object(),
+        usage_provider=FailingProvider(UsageBlockedError("Cloudflare challenge")),
+        session_controller=RecordingController(),
+    )
+
+    with pytest.raises(UsageBlockedError):
+        await service.check_account_now(account_watcher.id)
+
+    assert store.get_account(account.id).status == "logged-in"

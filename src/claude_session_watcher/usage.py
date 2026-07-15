@@ -15,8 +15,34 @@ class UsageAuthError(UsageError):
     pass
 
 
+class UsageBlockedError(UsageError):
+    """The request was blocked by bot protection (e.g. a Cloudflare challenge).
+
+    The session itself may be perfectly valid — callers should fall back to a
+    real browser instead of treating this as an authentication failure.
+    """
+
+
 class UsageLoginRequiredError(UsageError):
     pass
+
+
+def is_cloudflare_challenge(response: httpx.Response) -> bool:
+    """Detect a Cloudflare bot-challenge response (as opposed to a real API error).
+
+    Args:    response (httpx.Response): HTTP response to inspect.
+    Returns: bool: True when Cloudflare served a challenge page.
+    Depends: httpx
+    """
+    if response.headers.get("cf-mitigated", "").lower() == "challenge":
+        return True
+    if "text/html" not in response.headers.get("content-type", "").lower():
+        return False
+    try:
+        text = response.text[:2000].lower()
+    except Exception:  # noqa: BLE001 - body may not be decodable
+        return False
+    return "just a moment" in text or "challenge-platform" in text
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,6 +142,11 @@ class ClaudeUsageClient:
     @staticmethod
     def _raise_for_response(response: httpx.Response) -> None:
         if response.status_code in {401, 403}:
+            if is_cloudflare_challenge(response):
+                raise UsageBlockedError(
+                    "Claude usage request was blocked by a Cloudflare challenge "
+                    "(bot protection, not an auth problem)"
+                )
             raise UsageAuthError(f"Claude usage request was rejected: HTTP {response.status_code}")
         response.raise_for_status()
 
