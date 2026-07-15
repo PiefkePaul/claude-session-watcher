@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import httpx
 
-from .usage import ClaudeCookie
+from .usage import ClaudeCookie, is_cloudflare_challenge
 
 
 class SessionListError(Exception):
@@ -90,6 +90,11 @@ class ClaudeWebSessionsClient:
     @staticmethod
     def _raise_for_response(response: httpx.Response) -> None:
         if response.status_code in {401, 403}:
+            if is_cloudflare_challenge(response):
+                raise SessionListError(
+                    "Claude sessions request was blocked by a Cloudflare challenge "
+                    "(bot protection, not an auth problem)"
+                )
             raise SessionListAuthError(
                 f"Claude sessions request was rejected: HTTP {response.status_code}"
             )

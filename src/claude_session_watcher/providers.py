@@ -11,6 +11,7 @@ from .profile_cookies import load_claude_cookies
 from .usage import (
     ClaudeUsageClient,
     UsageAuthError,
+    UsageBlockedError,
     UsageError,
     UsageLoginRequiredError,
     UsageSnapshot,
@@ -50,6 +51,9 @@ class CamoufoxBrowserUsageProvider:
 
     async def fetch(self, account: Account) -> UsageFetchResult:
         profile_dir = Path(account.profile_dir)
+        # Never close a browser the user already has open (e.g. a login flow in
+        # progress) — only clean up sessions this fetch opened itself.
+        was_open = await self.browser.is_profile_open(profile_dir)
         try:
             usage_data = await self.browser.fetch_usage(profile_dir)
             return UsageFetchResult(
@@ -57,7 +61,7 @@ class CamoufoxBrowserUsageProvider:
                 source=self.source,
             )
         finally:
-            if not self.keepalive:
+            if not self.keepalive and not was_open:
                 await self.browser.close_profile(profile_dir)
 
 
@@ -70,11 +74,18 @@ class FallbackUsageProvider:
         try:
             return await self.primary.fetch(account)
         except UsageLoginRequiredError:
+            # No cookies at all — the browser cannot be logged in either.
             raise
         except UsageAuthError:
-            # Auth/session problems cannot be fixed by falling back to a browser-driven
-            # provider without user interaction. Falling back here can also interfere
-            # with an in-progress login flow by opening/closing the same profile.
+            # A genuine 401/403 (account_session_invalid) means the stored session
+            # is invalid *server-side* — the browser shares the same cookies and
+            # returns the identical error, so falling back would only waste a
+            # browser launch and, worse, contend with an in-progress manual login
+            # on the same profile. Surface it so the account is marked login-expired.
             raise
+        except UsageBlockedError:
+            # Cloudflare bot-challenge: the session is fine, only the plain HTTP
+            # request was blocked. A real browser passes the challenge, so retry.
+            return await self.fallback.fetch(account)
         except (UsageError, OSError, sqlite3.Error):
             return await self.fallback.fetch(account)

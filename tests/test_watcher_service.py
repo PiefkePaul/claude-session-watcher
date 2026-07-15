@@ -4,8 +4,20 @@ from claude_session_watcher.discovery import SessionDiscoveryService
 from claude_session_watcher.models import ClaudeSession
 from claude_session_watcher.providers import UsageFetchResult
 from claude_session_watcher.store import Store
-from claude_session_watcher.usage import ClaudeUsageClient
+from claude_session_watcher.usage import (
+    ClaudeUsageClient,
+    UsageAuthError,
+    UsageLoginRequiredError,
+)
 from claude_session_watcher.watcher import WatcherService
+
+
+class FailingProvider:
+    def __init__(self, exc: Exception):
+        self.exc = exc
+
+    async def fetch(self, account):
+        raise self.exc
 
 
 class StaticLimitProvider:
@@ -251,3 +263,91 @@ async def test_service_auto_discovers_and_selects_new_remote_sessions(tmp_path):
     assert provider.calls == 1
     assert saved.watch_enabled is True
     assert controller.sent == [("session_new", account_watcher.pause_message)]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "exc",
+    [
+        UsageAuthError("Claude usage request was rejected: HTTP 401"),
+        UsageLoginRequiredError("No sessionKey cookie found"),
+    ],
+)
+async def test_auth_error_downgrades_account_to_login_expired(tmp_path, exc):
+    store = Store(tmp_path / "watcher.sqlite3")
+    account = store.create_account("work", str(tmp_path / "profile"))
+    store.update_account_status(account.id, "logged-in")
+    account_watcher = store.ensure_account_watcher(account.id)
+    service = WatcherService(
+        store,
+        browser=None,
+        settings=object(),
+        usage_provider=FailingProvider(exc),
+        session_controller=RecordingController(),
+    )
+
+    with pytest.raises(type(exc)):
+        await service.check_account_now(account_watcher.id)
+
+    assert store.get_account(account.id).status == "login-expired"
+
+
+@pytest.mark.asyncio
+async def test_successful_fetch_restores_logged_in_after_expiry(tmp_path):
+    store = Store(tmp_path / "watcher.sqlite3")
+    account = store.create_account("work", str(tmp_path / "profile"))
+    store.update_account_status(account.id, "login-expired")
+    account_watcher = store.ensure_account_watcher(account.id)
+    service = WatcherService(
+        store,
+        browser=None,
+        settings=object(),
+        usage_provider=StaticLimitProvider(),
+        session_controller=RecordingController(),
+    )
+
+    await service.check_account_now(account_watcher.id)
+
+    assert store.get_account(account.id).status == "logged-in"
+
+
+@pytest.mark.asyncio
+async def test_non_auth_error_keeps_account_status(tmp_path):
+    store = Store(tmp_path / "watcher.sqlite3")
+    account = store.create_account("work", str(tmp_path / "profile"))
+    store.update_account_status(account.id, "logged-in")
+    account_watcher = store.ensure_account_watcher(account.id)
+    service = WatcherService(
+        store,
+        browser=None,
+        settings=object(),
+        usage_provider=FailingProvider(RuntimeError("network glitch")),
+        session_controller=RecordingController(),
+    )
+
+    with pytest.raises(RuntimeError):
+        await service.check_account_now(account_watcher.id)
+
+    assert store.get_account(account.id).status == "logged-in"
+
+
+@pytest.mark.asyncio
+async def test_blocked_error_does_not_mark_login_expired(tmp_path):
+    from claude_session_watcher.usage import UsageBlockedError
+
+    store = Store(tmp_path / "watcher.sqlite3")
+    account = store.create_account("work", str(tmp_path / "profile"))
+    store.update_account_status(account.id, "logged-in")
+    account_watcher = store.ensure_account_watcher(account.id)
+    service = WatcherService(
+        store,
+        browser=None,
+        settings=object(),
+        usage_provider=FailingProvider(UsageBlockedError("Cloudflare challenge")),
+        session_controller=RecordingController(),
+    )
+
+    with pytest.raises(UsageBlockedError):
+        await service.check_account_now(account_watcher.id)
+
+    assert store.get_account(account.id).status == "logged-in"
