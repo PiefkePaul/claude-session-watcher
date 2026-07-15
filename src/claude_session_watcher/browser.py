@@ -732,8 +732,36 @@ class CamoufoxManager:
         context = await self.context_for_profile(profile_dir)
         page = await self._get_or_open_page(context, "https://claude.ai/code")
         await page.goto("https://claude.ai/code", wait_until="domcontentloaded")
-        return await page.evaluate(
-            """
+        # claude.ai/code is a React SPA: right after domcontentloaded the session
+        # list has not been rendered yet, so an immediate scan finds zero links.
+        return await self._collect_code_session_links(page)
+
+    async def _collect_code_session_links(
+        self,
+        page,
+        *,
+        timeout_s: float = 15.0,
+        interval_s: float = 0.5,
+    ) -> list[dict[str, Any]]:
+        """Poll the page for rendered /code/ session links until found or timeout.
+
+        Args:    page: Playwright page already navigated to claude.ai/code.
+                 timeout_s (float): Maximum time to wait for the SPA to render.
+                 interval_s (float): Delay between scan attempts.
+        Returns: list[dict]: Discovered session link dicts (may be empty).
+        Depends: _CODE_SESSION_LINKS_JS
+        """
+        deadline = asyncio.get_event_loop().time() + timeout_s
+        result: list[dict[str, Any]] = []
+        while True:
+            result = await page.evaluate(self._CODE_SESSION_LINKS_JS)
+            if result:
+                return result
+            if asyncio.get_event_loop().time() >= deadline:
+                return result
+            await asyncio.sleep(interval_s)
+
+    _CODE_SESSION_LINKS_JS = """
             () => {
               const seen = new Map();
               const links = Array.from(document.querySelectorAll("a[href]"));
@@ -765,8 +793,7 @@ class CamoufoxManager:
               }
               return Array.from(seen.values());
             }
-            """,
-        )
+            """
 
     async def _browser_json(self, page, path: str):
         return await page.evaluate(
