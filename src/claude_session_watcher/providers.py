@@ -11,6 +11,7 @@ from .profile_cookies import load_claude_cookies
 from .usage import (
     ClaudeUsageClient,
     UsageAuthError,
+    UsageBlockedError,
     UsageError,
     UsageLoginRequiredError,
     UsageSnapshot,
@@ -75,14 +76,16 @@ class FallbackUsageProvider:
         except UsageLoginRequiredError:
             # No cookies at all — the browser cannot be logged in either.
             raise
-        except UsageAuthError as auth_exc:
-            # claude.ai rejects session cookies used outside the browser
-            # (account_session_invalid), so a 401/403 no longer proves the login
-            # is gone. Only when the browser-driven fetch also fails do we
-            # surface the auth error (→ genuine login problem).
-            try:
-                return await self.fallback.fetch(account)
-            except Exception as fallback_exc:
-                raise auth_exc from fallback_exc
+        except UsageAuthError:
+            # A genuine 401/403 (account_session_invalid) means the stored session
+            # is invalid *server-side* — the browser shares the same cookies and
+            # returns the identical error, so falling back would only waste a
+            # browser launch and, worse, contend with an in-progress manual login
+            # on the same profile. Surface it so the account is marked login-expired.
+            raise
+        except UsageBlockedError:
+            # Cloudflare bot-challenge: the session is fine, only the plain HTTP
+            # request was blocked. A real browser passes the challenge, so retry.
+            return await self.fallback.fetch(account)
         except (UsageError, OSError, sqlite3.Error):
             return await self.fallback.fetch(account)

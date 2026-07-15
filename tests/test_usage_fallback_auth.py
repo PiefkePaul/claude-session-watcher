@@ -45,26 +45,16 @@ class SucceedingProvider:
         return UsageFetchResult(snapshot=snapshot, source="browser")
 
 
-async def test_auth_error_falls_back_to_browser_provider():
+async def test_auth_error_does_not_touch_browser_fallback():
+    # A genuine auth error means the browser (same cookies) would fail identically;
+    # falling back only wastes a launch and can disrupt an in-progress manual login.
     fallback = SucceedingProvider()
     provider = FallbackUsageProvider(RaisingProvider(UsageAuthError("HTTP 403")), fallback)
-
-    result = await provider.fetch(account=None)
-
-    assert result.source == "browser"
-    assert fallback.calls == 1
-
-
-async def test_auth_error_reraised_when_browser_fallback_also_fails():
-    fallback = RaisingProvider(RuntimeError("browser broken"))
-    provider = FallbackUsageProvider(
-        RaisingProvider(UsageAuthError("HTTP 403")), fallback
-    )
 
     with pytest.raises(UsageAuthError):
         await provider.fetch(account=None)
 
-    assert fallback.calls == 1
+    assert fallback.calls == 0
 
 
 async def test_login_required_does_not_touch_browser_fallback():
