@@ -44,11 +44,14 @@ async def test_fallback_usage_provider_uses_browser_fallback_on_cookie_error():
 
 
 @pytest.mark.asyncio
-async def test_fallback_usage_provider_does_not_fallback_on_auth_error():
+async def test_fallback_usage_provider_falls_back_on_auth_error():
+    # claude.ai rejects session cookies used outside the browser
+    # (account_session_invalid), so auth errors must retry via the browser.
     provider = FallbackUsageProvider(FailingProvider(), SuccessfulProvider())
 
-    with pytest.raises(UsageAuthError):
-        await provider.fetch(Account(id=1, name="work", profile_dir="profile"))
+    result = await provider.fetch(Account(id=1, name="work", profile_dir="profile"))
+
+    assert result.source == "fallback"
 
 
 @pytest.mark.asyncio
